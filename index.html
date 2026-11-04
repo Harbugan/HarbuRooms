@@ -14,29 +14,52 @@ try {
   document.querySelector('#error').textContent = '3D engine could not load. Check your connection or browser console.';
   throw error;
 }
-const scene=new THREE.Scene();scene.background=new THREE.Color(0x151c1e);scene.fog=new THREE.FogExp2(0x151c1e,.027);
-const camera=new THREE.PerspectiveCamera(76,innerWidth/innerHeight,.06,145);camera.rotation.order='YXZ';
-const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
-const ambient=new THREE.HemisphereLight(0xc8e0e5,0x4c4c49,1.3);scene.add(ambient);
-const tile=16, range=2, chunks=new Map(), solids=[];const boxGeo=new THREE.BoxGeometry(1,1,1);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x151c1e);scene.fog=new THREE.FogExp2(0x151c1e,.03);
+const camera=new THREE.PerspectiveCamera(76,innerWidth/innerHeight,.06,90);camera.rotation.order='YXZ';
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
+// Lighting is baked into vertex colours (see Builder), so only cheap global lights are needed. No per-chunk PointLights.
+scene.add(new THREE.HemisphereLight(0xc8e0e5,0x4c4c49,1.0));
+scene.add(camera);const torch=new THREE.PointLight(0xfff3e0,3,14,2);torch.position.set(0,.2,0);camera.add(torch);
+const tile=16, range=2, chunks=new Map();
 const palettes=[{name:'THE ATRIUM',floor:0x647d78,wall:0xb4d5c7,ceil:0xcedcd2,light:0xb9faff},{name:'THE HOTEL',floor:0x6f5961,wall:0xb7a5a0,ceil:0xd8c6ba,light:0xffd6ae},{name:'THE POOL',floor:0x4a9198,wall:0x8bc3c3,ceil:0xc5e4dd,light:0x9df3ff},{name:'THE WAITING ROOM',floor:0x6d755a,wall:0xc5c6a6,ceil:0xe1dcc4,light:0xf6efb5}];
 function hash(x,z,s=0){let n=Math.imul(x,374761393)+Math.imul(z,668265263)+Math.imul(s,1442695041);n=Math.imul(n^(n>>>13),1274126177);return ((n^(n>>>16))>>>0)/4294967296}
-const mats=new Map();function mat(color){if(!mats.has(color))mats.set(color,new THREE.MeshStandardMaterial({color,roughness:.93}));return mats.get(color)}
-function block(group,x,y,z,w,h,d,color,collide=false){const m=new THREE.Mesh(boxGeo,mat(color));m.position.set(x,y,z);m.scale.set(w,h,d);group.add(m);if(collide)group.userData.walls.push({x,z,w,d});return m}
-function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const g=new THREE.Group();g.userData.walls=[];const p=palettes[Math.floor(hash(Math.floor(cx/2),Math.floor(cz/2))*palettes.length)];const ox=cx*tile,oz=cz*tile;
-block(g,ox+8,-.18,oz+8,16,.36,16,p.floor);block(g,ox+8,6.25,oz+8,16,.35,16,p.ceil);
-// Every cell connects to its neighbours through wide, aligned openings.
-for(let side=0;side<2;side++){const north=side===0;const z=north?oz:oz+16;const x=ox+8;const wall=p.wall;const offset=(hash(cx,cz,side+7)-.5)*3;const mid=(north?x:z)+offset;
-if(north){block(g,ox+2.1,2.9,z,4.2,5.8,.42,wall,true);block(g,ox+13.9,2.9,z,4.2,5.8,.42,wall,true);block(g,ox+8,5.25,z,7.6,1.3,.42,wall,true)}else{block(g,ox+2.1,2.9,z,4.2,5.8,.42,wall,true);block(g,ox+13.9,2.9,z,4.2,5.8,.42,wall,true);block(g,ox+8,5.25,z,7.6,1.3,.42,wall,true)}}
+const paletteAt=(cx,cz)=>palettes[Math.floor(hash(Math.floor(cx/2),Math.floor(cz/2))*palettes.length)];
+// Shared materials: Lambert + vertex colours is far cheaper than Standard; "glow" panels ignore lighting.
+const litMat=new THREE.MeshLambertMaterial({vertexColors:true}),glowMat=new THREE.MeshBasicMaterial({vertexColors:true});
+const _box=new THREE.BoxGeometry(1,1,1),BP=_box.attributes.position.array,BN=_box.attributes.normal.array,BI=_box.index.array,_c=new THREE.Color();
+// Merges all boxes of a chunk into one lit + one glow geometry, baking ceiling-light pools into vertex colours.
+class Builder{
+  constructor(lights){this.lights=lights;this.lit={p:[],n:[],c:[],i:[]};this.glow={p:[],n:[],c:[],i:[]};this.walls=[]}
+  box(x,y,z,w,h,d,color,collide=false,glow=false){
+    const b=glow?this.glow:this.lit,base=b.p.length/3;_c.set(color);
+    for(let v=0;v<24;v++){const px=BP[v*3]*w+x,py=BP[v*3+1]*h+y,pz=BP[v*3+2]*d+z;b.p.push(px,py,pz);b.n.push(BN[v*3],BN[v*3+1],BN[v*3+2]);
+      let s=1;if(!glow){s=.5;for(const L of this.lights){const dx=px-L.x,dy=py-L.y,dz=pz-L.z,q=(dx*dx+dy*dy+dz*dz)/36;s+=L.k/(1+q)}s=Math.min(s,1.2)}
+      b.c.push(_c.r*s,_c.g*s,_c.b*s)}
+    for(let i=0;i<36;i++)b.i.push(BI[i]+base);
+    if(collide)this.walls.push({x,z,w,d})}
+  mesh(b,m){if(!b.p.length)return null;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(b.p,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(b.n,3));g.setAttribute('color',new THREE.Float32BufferAttribute(b.c,3));g.setIndex(b.i);g.computeBoundingSphere();const o=new THREE.Mesh(g,m);o.matrixAutoUpdate=false;return o}
+}
+function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const p=paletteAt(cx,cz);const ox=cx*tile,oz=cz*tile;
+const lights=[];for(let i=0;i<4;i++)lights.push({x:ox+4+(i%2)*8,y:5.75,z:oz+4+Math.floor(i/2)*8,k:hash(cx,cz,i+30)<.12?.1:.35});
+const B=new Builder(lights),wall=p.wall;
+B.box(ox+8,-.18,oz+8,16,.36,16,p.floor);B.box(ox+8,6.25,oz+8,16,.35,16,p.ceil);
+// Every cell connects to its neighbours through wide, aligned openings (north + south walls).
+for(const z of [oz,oz+16]){B.box(ox+2.1,2.9,z,4.2,5.8,.42,wall,true);B.box(ox+13.9,2.9,z,4.2,5.8,.42,wall,true);B.box(ox+8,5.25,z,7.6,1.3,.42,wall,true)}
 // West boundary is owned by this chunk; east is owned by next chunk.
-block(g,ox,2.9,oz+2.1,.42,5.8,4.2,p.wall,true);block(g,ox,2.9,oz+13.9,.42,5.8,4.2,p.wall,true);block(g,ox,5.25,oz+8,.42,1.3,7.6,p.wall,true);
+B.box(ox,2.9,oz+2.1,.42,5.8,4.2,wall,true);B.box(ox,2.9,oz+13.9,.42,5.8,4.2,wall,true);B.box(ox,5.25,oz+8,.42,1.3,7.6,wall,true);
 // Local architecture: columns, benches, decorative partitions, always leaving a path.
-const variation=hash(cx,cz,21);if(variation<.36){for(const [dx,dz] of [[4.6,4.6],[11.4,11.4]]){block(g,ox+dx,2.8,oz+dz,.8,5.6,.8,p.wall,true);block(g,ox+dx,5.8,oz+dz,1.35,.3,1.35,p.ceil)}}else if(variation<.62){block(g,ox+8,1,oz+8,3,2,1.4,p.wall,true);block(g,ox+8,2.08,oz+8,3.3,.16,1.65,p.ceil)}else if(variation<.78){block(g,ox+8,2.6,oz+8,.45,5.2,3.6,p.wall,true)}
-for(let i=0;i<4;i++){const lx=ox+4+(i%2)*8,lz=oz+4+Math.floor(i/2)*8;block(g,lx,6.03,lz,3,.07,.8,0xe5f2e6);const light=new THREE.PointLight(p.light,hash(cx,cz,i+30)<.12?1:3.2,13,2);light.position.set(lx,5.75,lz);g.add(light)}
-// Tile / carpet striping and small, subtle landmarks.
-for(let i=0;i<5;i++){const x=ox+2+i*3;block(g,x,.015,oz+8,.045,.025,15,p.ceil)}
+const v=hash(cx,cz,21);if(v<.36){for(const [dx,dz] of [[4.6,4.6],[11.4,11.4]]){B.box(ox+dx,2.8,oz+dz,.8,5.6,.8,wall,true);B.box(ox+dx,5.8,oz+dz,1.35,.3,1.35,p.ceil)}}else if(v<.62){B.box(ox+8,1,oz+8,3,2,1.4,wall,true);B.box(ox+8,2.08,oz+8,3.3,.16,1.65,p.ceil)}else if(v<.78){B.box(ox+8,2.6,oz+8,.45,5.2,3.6,wall,true)}
+for(const L of lights)B.box(L.x,6.03,L.z,3,.07,.8,0xe5f2e6,false,true);
+// Tile / carpet striping.
+for(let i=0;i<5;i++)B.box(ox+2+i*3,.015,oz+8,.045,.025,15,p.ceil);
+const g=new THREE.Group();g.userData.walls=B.walls;for(const m of [B.mesh(B.lit,litMat),B.mesh(B.glow,glowMat)])if(m){m.updateMatrix();g.add(m)}
 scene.add(g);chunks.set(id,g)}
-function updateChunks(){const cx=Math.floor(camera.position.x/tile),cz=Math.floor(camera.position.z/tile);for(let x=cx-range;x<=cx+range;x++)for(let z=cz-range;z<=cz+range;z++)addChunk(x,z);for(const [id,g] of chunks){const [x,z]=id.split(',').map(Number);if(Math.abs(x-cx)>range||Math.abs(z-cz)>range){scene.remove(g);chunks.delete(id)}}const p=palettes[Math.floor(hash(Math.floor(cx/2),Math.floor(cz/2))*palettes.length)];document.querySelector('#status').textContent=`SECTOR ${cx},${cz} · ${p.name} · ${chunks.size} CELLS ACTIVE`}
+function removeChunk(id,g){scene.remove(g);g.traverse(o=>o.geometry&&o.geometry.dispose());chunks.delete(id)}
+const statusEl=document.querySelector('#status');let lastCx=NaN,lastCz=NaN;
+function updateChunks(){const cx=Math.floor(camera.position.x/tile),cz=Math.floor(camera.position.z/tile);if(cx===lastCx&&cz===lastCz)return;lastCx=cx;lastCz=cz;
+for(let x=cx-range;x<=cx+range;x++)for(let z=cz-range;z<=cz+range;z++)addChunk(x,z);
+for(const [id,g] of [...chunks]){const [x,z]=id.split(',').map(Number);if(Math.abs(x-cx)>range||Math.abs(z-cz)>range)removeChunk(id,g)}
+statusEl.textContent=`SECTOR ${cx},${cz} · ${paletteAt(cx,cz).name} · ${chunks.size} CELLS ACTIVE`}
 const overlay=document.querySelector('#overlay'),start=document.querySelector('#start');let playing=false;start.onclick=async()=>{try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock();}catch(error){document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}};document.addEventListener('pointerlockchange',()=>{playing=document.pointerLockElement===renderer.domElement;overlay.style.display=playing?'none':'flex';start.textContent=playing?'ENTER THE ROOMS':'CONTINUE EXPLORING'});document.addEventListener('mousemove',e=>{if(!playing)return;camera.rotation.y-=e.movementX*.002;camera.rotation.x=Math.max(-1.48,Math.min(1.48,camera.rotation.x-e.movementY*.002))});const keys=new Set();addEventListener('keydown',e=>{keys.add(e.code);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));addEventListener('blur',()=>keys.clear());camera.position.set(8,1.7,8);
 function collide(x,z){const cx=Math.floor(x/tile),cz=Math.floor(z/tile);for(let a=cx-1;a<=cx+1;a++)for(let b=cz-1;b<=cz+1;b++){const g=chunks.get(a+','+b);if(!g)continue;for(const w of g.userData.walls){if(Math.abs(x-w.x)<w.w/2+.37&&Math.abs(z-w.z)<w.d/2+.37)return true}}return false}
 let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?8:4.4)*dt;const yaw=camera.rotation.y,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;if(!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*11;camera.position.y=1.7+Math.sin(elapsed)*.035}else camera.position.y+=(1.7-camera.position.y)*.12;updateChunks()}renderer.render(scene,camera)}updateChunks();requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
