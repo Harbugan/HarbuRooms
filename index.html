@@ -18,7 +18,7 @@ const scene=new THREE.Scene();scene.background=new THREE.Color(0x2b2510);scene.f
 const camera=new THREE.PerspectiveCamera(78,innerWidth/innerHeight,.05,80);camera.rotation.order='YXZ';
 const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
 // Lighting is baked into vertex colours (see Builder), so only cheap global lights are needed. No per-chunk PointLights.
-const ambient=new THREE.HemisphereLight(0xfff4c0,0xa8985a,1.25);scene.add(ambient);
+const ambient=new THREE.HemisphereLight(0xfff4c0,0xa8985a,1.6);scene.add(ambient);
 scene.add(camera);const torch=new THREE.PointLight(0xfff0c0,2.2,12,2);torch.position.set(0,.3,0);camera.add(torch);
 const tile=16, range=2, chunks=new Map(), H=2.9; // low, oppressive ceiling
 // Backrooms: yellowed wallpaper, damp carpet, stained ceiling tiles, sickly fluorescent light.
@@ -30,19 +30,43 @@ const palettes=[
 function hash(x,z,s=0){let n=Math.imul(x,374761393)+Math.imul(z,668265263)+Math.imul(s,1442695041);n=Math.imul(n^(n>>>13),1274126177);return ((n^(n>>>16))>>>0)/4294967296}
 const paletteAt=(cx,cz)=>palettes[Math.floor(hash(Math.floor(cx/2),Math.floor(cz/2))*palettes.length)];
 // Shared materials: Lambert + vertex colours is far cheaper than Standard; "glow" panels ignore lighting.
-const litMat=new THREE.MeshLambertMaterial({vertexColors:true}),glowMat=new THREE.MeshBasicMaterial({vertexColors:true});
+// Procedural canvas textures (no asset files). Kept near-white so the palette colours (vertex colours) tint them.
+function mulberry(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function grain(g,w,h,r,amt){const d=g.getImageData(0,0,w,h),p=d.data;for(let i=0;i<p.length;i+=4){const n=(r()-.5)*amt;p[i]+=n;p[i+1]+=n;p[i+2]+=n}g.putImageData(d,0,0)}
+function makeTex(w,h,seed,draw){const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');draw(g,w,h,mulberry(seed));const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=renderer.capabilities.getMaxAnisotropy();return t}
+// Wall: 2 m wide x full wall height. Striped wallpaper, diamond motif, water stains, grime and a baseboard.
+const wallTex=makeTex(512,512,11,(g,w,h,r)=>{g.fillStyle='#f1efe6';g.fillRect(0,0,w,h);
+  for(let x=0;x<w;x+=64){g.fillStyle='rgba(120,100,40,.22)';g.fillRect(x+10,0,22,h);g.fillStyle='rgba(90,70,20,.25)';g.fillRect(x+10,0,2,h);g.fillRect(x+30,0,2,h)}
+  g.fillStyle='rgba(110,90,30,.2)';for(let x=0;x<w;x+=64)for(let y=20;y<h;y+=48){g.beginPath();g.moveTo(x+48,y-8);g.lineTo(x+54,y);g.lineTo(x+48,y+8);g.lineTo(x+42,y);g.fill()}
+  for(let i=0;i<7;i++){const x=r()*w,len=60+r()*220,wd=10+r()*30,gr=g.createLinearGradient(0,0,0,len);gr.addColorStop(0,'rgba(80,60,10,.32)');gr.addColorStop(1,'rgba(80,60,10,0)');g.save();g.translate(x,0);g.fillStyle=gr;g.fillRect(-wd/2,0,wd,len);g.restore()}
+  const gb=g.createLinearGradient(0,h-100,0,h-20);gb.addColorStop(0,'rgba(60,45,10,0)');gb.addColorStop(1,'rgba(60,45,10,.35)');g.fillStyle=gb;g.fillRect(0,h-100,w,80);
+  grain(g,w,h,r,22);g.fillStyle='#5a4a2c';g.fillRect(0,h-20,w,20);g.fillStyle='#34291400';g.fillStyle='#3a2f18';g.fillRect(0,h-22,w,2)});
+// Floor: 2 m x 2 m damp, worn carpet.
+const floorTex=makeTex(512,512,22,(g,w,h,r)=>{g.fillStyle='#f4f0e0';g.fillRect(0,0,w,h);
+  for(let i=0;i<10;i++){const x=r()*w,y=r()*h,rad=50+r()*110,dark=r()<.6;for(const ox of [-w,0,w])for(const oy of [-h,0,h]){const gr=g.createRadialGradient(x+ox,y+oy,0,x+ox,y+oy,rad);gr.addColorStop(0,dark?'rgba(40,30,5,.14)':'rgba(255,250,200,.14)');gr.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=gr;g.fillRect(x+ox-rad,y+oy-rad,rad*2,rad*2)}}
+  for(let i=0;i<9000;i++){g.fillStyle=r()<.5?'rgba(0,0,0,.18)':'rgba(255,255,255,.18)';g.fillRect(r()*w,r()*h,2,2)}
+  grain(g,w,h,r,40)});
+// Ceiling: 2 m x 2 m = 2x2 stained acoustic tiles with dark seams.
+const ceilTex=makeTex(512,512,33,(g,w,h,r)=>{g.fillStyle='#efede0';g.fillRect(0,0,w,h);
+  for(let tx=0;tx<2;tx++)for(let ty=0;ty<2;ty++){const x0=tx*256,y0=ty*256;
+    if(r()<.5){const x=x0+40+r()*176,y=y0+40+r()*176,rad=30+r()*70,gr=g.createRadialGradient(x,y,0,x,y,rad);gr.addColorStop(0,'rgba(110,80,20,.35)');gr.addColorStop(1,'rgba(110,80,20,0)');g.fillStyle=gr;g.fillRect(x-rad,y-rad,rad*2,rad*2)}
+    g.fillStyle='rgba(60,50,20,.35)';for(let i=0;i<500;i++)g.fillRect(x0+8+r()*240,y0+8+r()*240,2,2)}
+  grain(g,w,h,r,16);g.fillStyle='rgba(70,62,30,.85)';for(let k=0;k<=2;k++){g.fillRect(k*256-2,0,4,h);g.fillRect(0,k*256-2,w,4)}});
+const mat=map=>new THREE.MeshLambertMaterial({vertexColors:true,map}),wallMat=mat(wallTex),floorMat=mat(floorTex),ceilMat=mat(ceilTex),glowMat=new THREE.MeshBasicMaterial({vertexColors:true});
 const _box=new THREE.BoxGeometry(1,1,1),BP=_box.attributes.position.array,BN=_box.attributes.normal.array,BI=_box.index.array,_c=new THREE.Color();
 // Merges all boxes of a chunk into one lit + one glow geometry, baking ceiling-light pools into vertex colours.
 class Builder{
-  constructor(lights){this.lights=lights;this.lit={p:[],n:[],c:[],i:[]};this.glow={p:[],n:[],c:[],i:[]};this.walls=[]}
-  box(x,y,z,w,h,d,color,collide=false,glow=false){
-    const b=glow?this.glow:this.lit,base=b.p.length/3;_c.set(color);
-    for(let v=0;v<24;v++){const px=BP[v*3]*w+x,py=BP[v*3+1]*h+y,pz=BP[v*3+2]*d+z;b.p.push(px,py,pz);b.n.push(BN[v*3],BN[v*3+1],BN[v*3+2]);
+  constructor(lights){this.lights=lights;this.b={};for(const k of ['wall','floor','ceil','glow'])this.b[k]={p:[],n:[],c:[],u:[],i:[]};this.walls=[]}
+  // kind: wall | floor | ceil | glow. UVs are world-space so textures run seamlessly across merged boxes.
+  box(x,y,z,w,h,d,color,collide=false,kind='wall'){
+    const b=this.b[kind],glow=kind==='glow',base=b.p.length/3;_c.set(color);
+    for(let v=0;v<24;v++){const nx=BN[v*3],ny=BN[v*3+1],px=BP[v*3]*w+x,py=BP[v*3+1]*h+y,pz=BP[v*3+2]*d+z;b.p.push(px,py,pz);b.n.push(nx,ny,BN[v*3+2]);
       let s=1;if(!glow){s=.6;for(const L of this.lights){const dx=px-L.x,dy=py-L.y,dz=pz-L.z,q=(dx*dx+dy*dy+dz*dz)/30;s+=L.k/(1+q)}s=Math.min(s,1.3)}
-      b.c.push(_c.r*s,_c.g*s,_c.b*s)}
+      b.c.push(_c.r*s,_c.g*s,_c.b*s);
+      if(kind==='wall'){if(Math.abs(nx)>.5)b.u.push(pz/2,py/H);else if(Math.abs(ny)>.5)b.u.push(px/2,pz/2);else b.u.push(px/2,py/H)}else b.u.push(px/2,pz/2)}
     for(let i=0;i<36;i++)b.i.push(BI[i]+base);
     if(collide)this.walls.push({x,z,w,d})}
-  mesh(b,m){if(!b.p.length)return null;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(b.p,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(b.n,3));g.setAttribute('color',new THREE.Float32BufferAttribute(b.c,3));g.setIndex(b.i);g.computeBoundingSphere();const o=new THREE.Mesh(g,m);o.matrixAutoUpdate=false;return o}
+  mesh(b,m){if(!b.p.length)return null;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(b.p,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(b.n,3));g.setAttribute('color',new THREE.Float32BufferAttribute(b.c,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(b.u,2));g.setIndex(b.i);g.computeBoundingSphere();const o=new THREE.Mesh(g,m);o.matrixAutoUpdate=false;return o}
 }
 // Wall along X (axis 0) or Z (axis 1) with a doorway; "start" is the chunk corner, "off" the doorway centre along the wall.
 function wallWithDoor(B,ox,oz,axis,off,gap,color){const t=.3,lo=off-gap/2,hi=off+gap/2;
@@ -52,9 +76,7 @@ function wallWithDoor(B,ox,oz,axis,off,gap,color){const t=.3,lo=off-gap/2,hi=off
 function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const p=paletteAt(cx,cz);const ox=cx*tile,oz=cz*tile;
 const lights=[];for(let i=0;i<4;i++)lights.push({x:ox+4+(i%2)*8,y:H-.05,z:oz+4+Math.floor(i/2)*8,k:hash(cx,cz,i+30)<.18?.12:.55});
 const B=new Builder(lights),wall=p.wall,dark=0x4a3f1c;
-B.box(ox+8,-.18,oz+8,16,.36,16,p.floor);B.box(ox+8,H+.18,oz+8,16,.36,16,p.ceil);
-// Ceiling tile grid.
-for(let i=1;i<8;i++){B.box(ox+i*2,H-.01,oz+8,.06,.02,16,0x6d6742);B.box(ox+8,H-.01,oz+i*2,16,.02,.06,0x6d6742)}
+B.box(ox+8,-.18,oz+8,16,.36,16,p.floor,false,'floor');B.box(ox+8,H+.18,oz+8,16,.36,16,p.ceil,false,'ceil');
 // Each chunk owns its north (z) and west (x) walls; every wall has a doorway, so all cells connect, but it feels like a maze.
 const gN=hash(cx,cz,3)<.25?8:1.8+hash(cx,cz,4)*1.4,gW=hash(cx,cz,5)<.25?8:1.8+hash(cx,cz,6)*1.4;
 wallWithDoor(B,ox,oz,0,3+hash(cx,cz,7)*10,gN,wall);wallWithDoor(B,ox,oz,1,3+hash(cx,cz,8)*10,gW,wall);
@@ -64,8 +86,8 @@ if(v<.3){B.box(ox+5,H/2,oz+10.5,.3,H,6,wall,true)}
 else if(v<.55){B.box(ox+10.5,H/2,oz+6,7,H,.3,wall,true)}
 else if(v<.7){for(const [dx,dz] of [[5,5],[11,11]])B.box(ox+dx,H/2,oz+dz,.7,H,.7,wall,true)}
 // Baseboards along the doorway-less walls give the wallpaper a seam.
-for(const L of lights)B.box(L.x,H-.03,L.z,1.4,.05,1.4,p.light,false,true);
-const g=new THREE.Group();g.userData.walls=B.walls;for(const m of [B.mesh(B.lit,litMat),B.mesh(B.glow,glowMat)])if(m){m.updateMatrix();g.add(m)}
+for(const L of lights)B.box(L.x,H-.03,L.z,1.4,.05,1.4,p.light,false,'glow');
+const g=new THREE.Group();g.userData.walls=B.walls;for(const m of [B.mesh(B.b.wall,wallMat),B.mesh(B.b.floor,floorMat),B.mesh(B.b.ceil,ceilMat),B.mesh(B.b.glow,glowMat)])if(m){m.updateMatrix();g.add(m)}
 scene.add(g);chunks.set(id,g)}
 function removeChunk(id,g){scene.remove(g);g.traverse(o=>o.geometry&&o.geometry.dispose());chunks.delete(id)}
 const statusEl=document.querySelector('#status');let lastCx=NaN,lastCz=NaN;
@@ -76,5 +98,5 @@ statusEl.textContent=`SECTOR ${cx},${cz} · ${paletteAt(cx,cz).name} · ${chunks
 let hum;function startHum(){if(hum)return;try{const a=new (window.AudioContext||window.webkitAudioContext)(),g=a.createGain();g.gain.value=.05;g.connect(a.destination);for(const [f,v] of [[60,.5],[120,.3],[180,.12],[7200,.01]]){const o=a.createOscillator();o.type=f<200?'sawtooth':'sine';o.frequency.value=f;const og=a.createGain();og.gain.value=v;o.connect(og).connect(g);o.start()}hum=a}catch(e){console.warn('Audio unavailable',e)}}
 const overlay=document.querySelector('#overlay'),start=document.querySelector('#start');let playing=false;start.onclick=async()=>{startHum();try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock();}catch(error){document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}};document.addEventListener('pointerlockchange',()=>{playing=document.pointerLockElement===renderer.domElement;overlay.style.display=playing?'none':'flex';start.textContent=playing?'ENTER THE ROOMS':'CONTINUE EXPLORING'});document.addEventListener('mousemove',e=>{if(!playing)return;camera.rotation.y-=e.movementX*.002;camera.rotation.x=Math.max(-1.48,Math.min(1.48,camera.rotation.x-e.movementY*.002))});const keys=new Set();addEventListener('keydown',e=>{keys.add(e.code);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));addEventListener('blur',()=>keys.clear());camera.position.set(8,1.7,4);
 function collide(x,z){const cx=Math.floor(x/tile),cz=Math.floor(z/tile);for(let a=cx-1;a<=cx+1;a++)for(let b=cz-1;b<=cz+1;b++){const g=chunks.get(a+','+b);if(!g)continue;for(const w of g.userData.walls){if(Math.abs(x-w.x)<w.w/2+.37&&Math.abs(z-w.z)<w.d/2+.37)return true}}return false}
-let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?8:4.4)*dt;const yaw=camera.rotation.y,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*11;camera.position.y=1.7+Math.sin(elapsed)*.035}else camera.position.y+=(1.7-camera.position.y)*.12;updateChunks()}ambient.intensity=1.2+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(Math.random()<.015?-.25:0);renderer.render(scene,camera)}updateChunks();requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?8:4.4)*dt;const yaw=camera.rotation.y,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*11;camera.position.y=1.7+Math.sin(elapsed)*.035}else camera.position.y+=(1.7-camera.position.y)*.12;updateChunks()}ambient.intensity=1.55+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(Math.random()<.015?-.25:0);renderer.render(scene,camera)}updateChunks();requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 </script></body></html>
