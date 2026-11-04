@@ -1,0 +1,62 @@
+name: Deploy HarbuRooms to NordicWay
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harburooms-nordicway-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Upload HarbuRooms via FTPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate credentials and entry point
+        env:
+          FTP_USER: ${{ secrets.NORDICWAY_FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.NORDICWAY_FTP_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FTP_USER" || { echo "::error::Missing NORDICWAY_FTP_USER"; exit 1; }
+          test -n "$FTP_PASSWORD" || { echo "::error::Missing NORDICWAY_FTP_PASSWORD"; exit 1; }
+          test -f index.html || { echo "::error::Missing index.html"; exit 1; }
+
+      - name: Upload website files
+        env:
+          FTP_USER: ${{ secrets.NORDICWAY_FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.NORDICWAY_FTP_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.svg' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.ico' -o -name '*.glb' -o -name '*.gltf' -o -name '*.bin' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) -not -path './.git/*' -not -path './.github/*' -print0 |
+          while IFS= read -r -d '' file; do
+            relative="${file#./}"
+            directory="${relative%/*}"
+            if [ "$directory" != "$relative" ]; then
+              curl --fail --show-error --silent --retry 2 --ssl-reqd --ftp-pasv \
+                --user "$FTP_USER:$FTP_PASSWORD" \
+                --ftp-create-dirs \
+                "ftp://cp17.nordicway.dk//public_html/Projects/HarbuRooms/$directory/" >/dev/null
+            fi
+            echo "Uploading $relative"
+            curl --fail --show-error --silent --retry 2 \
+              --ssl-reqd --ftp-pasv --ftp-create-dirs \
+              --user "$FTP_USER:$FTP_PASSWORD" \
+              --upload-file "$file" \
+              "ftp://cp17.nordicway.dk//public_html/Projects/HarbuRooms/$relative"
+          done
+          echo "HarbuRooms deployment completed (no remote deletions)."
