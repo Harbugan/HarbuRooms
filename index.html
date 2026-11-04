@@ -288,11 +288,25 @@ try{const a=new (window.AudioContext||window.webkitAudioContext)(),sr=a.sampleRa
   const step=(run,k)=>{const t=a.currentTime+.005,v=run?1.3:1,pan=a.createStereoPanner(),dg=a.createGain(),sw=a.createGain();pan.pan.value=k?.3:-.3;dg.gain.value=.4;sw.gain.value=1.15;pan.connect(dg).connect(out);pan.connect(sw).connect(wet);
     const o=a.createOscillator(),og=a.createGain();o.frequency.setValueAtTime(R(100,125),t);o.frequency.exponentialRampToValueAtTime(42,t+.14);og.gain.setValueAtTime(.0001,t);og.gain.exponentialRampToValueAtTime(.55*v,t+.008);og.gain.exponentialRampToValueAtTime(.0001,t+.17);o.connect(og).connect(pan);o.start(t);o.stop(t+.2);
     hit(t,pan,.4*v,R(520,820)*(run?1.3:1),.14);hit(t+.1,pan,.14*v,R(900,1300),.07)};
-  // vejrtrækning: kameramandens egen ånde – hurtigere og tungere når man løber
-  const bd=a.createGain(),bw=a.createGain();bd.gain.value=.9;bw.gain.value=.35;bd.connect(out);bw.connect(wet);
-  const puff=(t,d,f0,f1,pk,rise)=>{const s=a.createBufferSource(),bp=filt('bandpass',f0,.7),lp=filt('lowpass',2800,.5),g=a.createGain();s.buffer=nbuf;s.loop=true;bp.frequency.setValueAtTime(f0,t);bp.frequency.linearRampToValueAtTime(f1,t+d);g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(pk,t+d*rise);g.gain.exponentialRampToValueAtTime(.0001,t+d);s.connect(bp).connect(lp).connect(g);g.connect(bd);g.connect(bw);s.start(t,R(0,3));s.stop(t+d+.05)};
-  const breath=i=>{const j=R(.92,1.1),t=a.currentTime+.03,inh=(1.35-.85*i)*j,gap=.25-.15*i,exh=(1.9-1.1*i)*j;
-    puff(t,inh,450,1000,.16+.3*i,.6);puff(t+inh+gap,exh,900,420,.22+.4*i,.25);AUD.next=t+inh+gap+exh+(.6-.5*i)*j};
+  // Subtle human breathing: soft, filtered air with asymmetric phrasing and real silence.
+  // Keep it mostly dry and barely audible; exertion raises presence gently, not dramatically.
+  const bd=a.createGain(),bw=a.createGain();bd.gain.value=.12;bw.gain.value=.018;bd.connect(out);bw.connect(wet);
+  const puff=(t,d,fc,pk)=>{const s=a.createBufferSource(),hp=filt('highpass',180,.5),lp=filt('lowpass',fc,.5),g=a.createGain();
+    s.buffer=nbuf;s.loop=true;
+    const attack=d*R(.28,.4),release=d*R(.32,.44),peak=t+attack,hold=Math.max(peak+.03,t+d-release);
+    g.gain.setValueAtTime(0,t);
+    g.gain.linearRampToValueAtTime(pk*.42,t+attack*.52);
+    g.gain.linearRampToValueAtTime(pk,peak);
+    g.gain.linearRampToValueAtTime(pk*.78,hold);
+    g.gain.linearRampToValueAtTime(0,t+d);
+    s.connect(hp).connect(lp).connect(g);g.connect(bd);g.connect(bw);
+    s.start(t,R(0,3));s.stop(t+d+.02)};
+  const breath=i=>{const effort=Math.min(1,Math.max(0,i)),j=R(.9,1.12),t=a.currentTime+.03;
+    const inh=(1.6-.55*effort)*j,between=R(.18,.43),exh=(2.05-.62*effort)*j;
+    const presence=.11+.12*effort;
+    puff(t,inh,R(650,850),presence*R(.75,.95));
+    puff(t+inh+between,exh,R(550,750),presence*R(.82,1.05));
+    AUD.next=t+inh+between+exh+R(.9,1.8)-effort*.55};
   AUD={flicker,step,breath,next:0,ctx:a}}catch(e){console.warn('Audio unavailable',e)}}
 function footfalls(run){if(!AUD)return;const n=Math.floor((elapsed+Math.PI/2)/(2*Math.PI));if(stepN===null){stepN=n;return}if(n!==stepN){stepN=n;AUD.step(run,n&1)}}
 function breathe(){if(AUD&&playing&&AUD.ctx.currentTime>=AUD.next)AUD.breath(Math.min(1,moveAmt*.35+runAmt*.9))}
