@@ -14,8 +14,8 @@ try {
   document.querySelector('#error').textContent = '3D engine could not load. Check your connection or browser console.';
   throw error;
 }
-const scene=new THREE.Scene();scene.background=new THREE.Color(0x2b2510);scene.fog=new THREE.FogExp2(0x2b2510,.05);
-const camera=new THREE.PerspectiveCamera(78,innerWidth/innerHeight,.05,80);camera.rotation.order='YXZ';
+const scene=new THREE.Scene();const HAZE=0xb3a462;scene.background=new THREE.Color(HAZE);scene.fog=new THREE.FogExp2(HAZE,.027);
+const camera=new THREE.PerspectiveCamera(78,innerWidth/innerHeight,.05,110);camera.rotation.order='YXZ';
 const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
 // --- VHS post pass: scene renders into a half-float target, then a full-screen shader smears, wobbles, tints and vignettes it.
 const RES=.85,rt=new THREE.WebGLRenderTarget(2,2,{type:THREE.HalfFloatType,samples:4,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
@@ -44,7 +44,12 @@ void main(){
   vec3 col=vec3(0.);float ws=0.;
   for(int k=-3;k<=3;k++){float w=exp(-float(k*k)*.22),o=float(k)*px*1.6;
     col+=w*vec3(texture2D(tDiffuse,uv+vec2(o+ca,0.)).r,texture2D(tDiffuse,uv+vec2(o,0.)).g,texture2D(tDiffuse,uv+vec2(o-ca,0.)).b);ws+=w;}
-  col=enc(col/ws);
+  col=col/ws;
+  // dreamy halation: wide soft blur of bright areas bleeds into the picture
+  vec3 glow=vec3(0.);for(int k=0;k<16;k++){float a=float(k)*2.39996,r=sqrt(float(k)+.5)/4.;vec2 o=vec2(cos(a),sin(a))*r*vec2(res.y/res.x,1.)*.06;
+    vec3 c=texture2D(tDiffuse,uv+o).rgb;glow+=c*(1.-r*.6);}
+  glow/=12.;col=mix(col,glow,.22)+max(glow-.55,0.)*.55;
+  col=enc(col);
   // washed-out tape colour: desaturate, lift blacks, warm/magenta cast, soft highlight bloom
   float l=dot(col,vec3(.299,.587,.114));
   col=mix(vec3(l),col,.78);
@@ -60,21 +65,21 @@ void main(){
   col*=1.+(h11(floor(time*24.))-.5)*.05;
   // heavy vignette + darkened corners
   vec2 q=(vUv-.5)*vec2(1.08,1.);float v=length(q)*1.35;
-  col*=1.-smoothstep(.35,1.0,v)*.92;
+  col*=1.-smoothstep(.4,1.05,v)*.8;
   col*=smoothstep(0.,.03,vUv.y)*.35+.65;
   gl_FragColor=vec4(col,1.);}`});
 const postScene=new THREE.Scene(),postCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),vhsMat));
 function sizePost(){const pr=renderer.getPixelRatio();rt.setSize(Math.max(2,Math.round(innerWidth*pr*RES)),Math.max(2,Math.round(innerHeight*pr*RES)));vhsMat.uniforms.res.value.set(innerWidth*pr,innerHeight*pr)}sizePost();
 // Lighting is baked into vertex colours (see Builder), so only cheap global lights are needed. No per-chunk PointLights.
-const ambient=new THREE.HemisphereLight(0xfff8d0,0xc8a860,2.1);scene.add(ambient);
+const ambient=new THREE.HemisphereLight(0xfff8d8,0xd8c490,2.3);scene.add(ambient);
 scene.add(camera);const torch=new THREE.PointLight(0xfff0c0,2.2,12,2);torch.position.set(0,.3,0);camera.add(torch);
-const tile=16, range=2, chunks=new Map(), H=2.9; // low, oppressive ceiling
+const tile=16, range=4, chunks=new Map(), H=2.9; // low, oppressive ceiling
 // Backrooms: yellowed wallpaper, damp carpet, stained ceiling tiles, sickly fluorescent light.
 const palettes=[
-{name:'LEVEL 0 — THE LOBBY',floor:0xa87a3a,wall:0xe6d32a,ceil:0xf4efcc,light:0xffffff},
-{name:'LEVEL 0 — THE LOBBY',floor:0xa07236,wall:0xdfcc26,ceil:0xf0ebc6,light:0xfffff0},
-{name:'LEVEL 0 — DAMP CARPET',floor:0x8f6a30,wall:0xd5c424,ceil:0xe8e3bc,light:0xf8fbe0},
-{name:'LEVEL 0 — OLD OFFICE',floor:0xb4863f,wall:0xeedc34,ceil:0xf8f4d8,light:0xffffff}];
+{name:'LEVEL 0 — THE LOBBY',floor:0xc2aa76,wall:0xe2d05a,ceil:0xf2edcf,light:0xffffff,grid:0xf6f2dc},
+{name:'LEVEL 0 — THE LOBBY',floor:0xb9a06c,wall:0xdccb52,ceil:0xeee9c9,light:0xfffff4,grid:0xf2eed6},
+{name:'LEVEL 0 — DAMP CARPET',floor:0xaa9266,wall:0xd4c450,ceil:0xe6e1c0,light:0xf8fbe8,grid:0xebe7cf},
+{name:'LEVEL 0 — OLD OFFICE',floor:0xc8b07c,wall:0xe9d862,ceil:0xf6f2da,light:0xffffff,grid:0xfaf7e4}];
 function hash(x,z,s=0){let n=Math.imul(x,374761393)+Math.imul(z,668265263)+Math.imul(s,1442695041);n=Math.imul(n^(n>>>13),1274126177);return ((n^(n>>>16))>>>0)/4294967296}
 const paletteAt=(cx,cz)=>palettes[Math.floor(hash(Math.floor(cx/2),Math.floor(cz/2))*palettes.length)];
 // Shared materials: Lambert + vertex colours is far cheaper than Standard; "glow" panels ignore lighting.
@@ -96,21 +101,29 @@ const floorTex=makeTex(512,512,22,(g,w,h,r)=>{g.fillStyle='#f3ece0';g.fillRect(0
   for(let i=0;i<14000;i++){g.fillStyle=r()<.5?'rgba(60,30,0,.14)':'rgba(255,240,210,.16)';g.fillRect(r()*w,r()*h,2,2)}
   for(let i=0;i<5;i++){const x=r()*w,y=r()*h,rad=80+r()*120;for(const ox of [-w,0,w])for(const oy of [-h,0,h]){const gr=g.createRadialGradient(x+ox,y+oy,0,x+ox,y+oy,rad);gr.addColorStop(0,'rgba(60,35,0,.06)');gr.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=gr;g.fillRect(x+ox-rad,y+oy-rad,rad*2,rad*2)}}
   grain(g,w,h,r,22)});
-// Ceiling: 2 m x 2 m = 4x4 small acoustic tiles with thin dark seams.
-const ceilTex=makeTex(512,512,33,(g,w,h,r)=>{g.fillStyle='#f1eed6';g.fillRect(0,0,w,h);
-  for(let tx=0;tx<4;tx++)for(let ty=0;ty<4;ty++){const x0=tx*128,y0=ty*128;g.fillStyle='rgba(90,80,30,.22)';for(let i=0;i<90;i++)g.fillRect(x0+6+r()*116,y0+6+r()*116,2,2);
-    if(r()<.15){const x=x0+64,y=y0+64,gr=g.createRadialGradient(x,y,0,x,y,50);gr.addColorStop(0,'rgba(120,90,20,.18)');gr.addColorStop(1,'rgba(120,90,20,0)');g.fillStyle=gr;g.fillRect(x-50,y-50,100,100)}}
-  grain(g,w,h,r,10);g.fillStyle='rgba(50,42,12,.9)';for(let k=0;k<=4;k++){g.fillRect(k*128-1.5,0,3,h);g.fillRect(0,k*128-1.5,w,3)}});
-const mat=map=>new THREE.MeshLambertMaterial({vertexColors:true,map}),wallMat=mat(wallTex),floorMat=mat(floorTex),ceilMat=mat(ceilTex),glowMat=new THREE.MeshBasicMaterial({vertexColors:true});
+// Ceiling: 2 m x 2 m = 2x4 acoustic tiles (1 m x 0.5 m). Real T-bar grid geometry sits on the seams (see addChunk);
+// the texture adds fissured/pinhole surface, a soft recessed shadow inside each tile edge and the odd water stain.
+const ceilTex=makeTex(512,512,33,(g,w,h,r)=>{g.fillStyle='#f3f0dc';g.fillRect(0,0,w,h);const TW=256,TH=128;
+  for(let tx=0;tx<2;tx++)for(let ty=0;ty<4;ty++){const x0=tx*TW,y0=ty*TH,tone=(r()-.5)*14;
+    g.fillStyle=`rgba(${tone>0?255:90},${tone>0?250:80},${tone>0?220:30},${Math.abs(tone)/100})`;g.fillRect(x0,y0,TW,TH);
+    // fissures: short random worm-like strokes
+    g.lineCap='round';for(let i=0;i<70;i++){const x=x0+8+r()*(TW-16),y=y0+8+r()*(TH-16),a=r()*6.28,l=2+r()*7;g.strokeStyle=`rgba(80,70,30,${.12+r()*.16})`;g.lineWidth=1+r()*1.4;g.beginPath();g.moveTo(x,y);g.quadraticCurveTo(x+Math.cos(a+1)*l*.6,y+Math.sin(a+1)*l*.6,x+Math.cos(a)*l,y+Math.sin(a)*l);g.stroke()}
+    g.fillStyle='rgba(70,62,25,.22)';for(let i=0;i<260;i++)g.fillRect(x0+5+r()*(TW-10),y0+5+r()*(TH-10),1.5,1.5);
+    // recessed edge: tile sits a few mm above the grid, so its edges fall into shadow
+    const e=10;for(const [gx0,gy0,gx1,gy1,rx,ry,rw,rh] of [[x0,0,x0+e,0,x0,y0,e,TH],[x0+TW,0,x0+TW-e,0,x0+TW-e,y0,e,TH],[0,y0,0,y0+e,x0,y0,TW,e],[0,y0+TH,0,y0+TH-e,x0,y0+TH-e,TW,e]]){
+      const gr=g.createLinearGradient(gx0,gy0,gx1,gy1);gr.addColorStop(0,'rgba(60,52,18,.30)');gr.addColorStop(1,'rgba(60,52,18,0)');g.fillStyle=gr;g.fillRect(rx,ry,rw,rh)}
+    if(r()<.18){const x=x0+30+r()*(TW-60),y=y0+30+r()*(TH-60),rad=25+r()*35,gr=g.createRadialGradient(x,y,0,x,y,rad);gr.addColorStop(0,'rgba(140,105,30,.16)');gr.addColorStop(.85,'rgba(140,105,30,.10)');gr.addColorStop(1,'rgba(120,85,20,0)');g.fillStyle=gr;g.fillRect(x-rad,y-rad,rad*2,rad*2)}}
+  grain(g,w,h,r,9)});
+const mat=map=>new THREE.MeshLambertMaterial({vertexColors:true,map}),wallMat=mat(wallTex),floorMat=mat(floorTex),ceilMat=mat(ceilTex),glowMat=new THREE.MeshBasicMaterial({vertexColors:true}),gridMat=new THREE.MeshLambertMaterial({vertexColors:true});
 const _box=new THREE.BoxGeometry(1,1,1),BP=_box.attributes.position.array,BN=_box.attributes.normal.array,BI=_box.index.array,_c=new THREE.Color();
 // Merges all boxes of a chunk into one lit + one glow geometry, baking ceiling-light pools into vertex colours.
 class Builder{
-  constructor(lights){this.lights=lights;this.b={};for(const k of ['wall','floor','ceil','glow'])this.b[k]={p:[],n:[],c:[],u:[],i:[]};this.walls=[]}
-  // kind: wall | floor | ceil | glow. UVs are world-space so textures run seamlessly across merged boxes.
+  constructor(lights){this.lights=lights;this.b={};for(const k of ['wall','floor','ceil','glow','grid'])this.b[k]={p:[],n:[],c:[],u:[],i:[]};this.walls=[]}
+  // kind: wall | floor | ceil | glow | grid. UVs are world-space so textures run seamlessly across merged boxes.
   box(x,y,z,w,h,d,color,collide=false,kind='wall'){
     const b=this.b[kind],glow=kind==='glow',base=b.p.length/3;_c.set(color);
     for(let v=0;v<24;v++){const nx=BN[v*3],ny=BN[v*3+1],px=BP[v*3]*w+x,py=BP[v*3+1]*h+y,pz=BP[v*3+2]*d+z;b.p.push(px,py,pz);b.n.push(nx,ny,BN[v*3+2]);
-      let s=1;if(!glow){s=.75;for(const L of this.lights){const dx=px-L.x,dy=py-L.y,dz=pz-L.z,q=(dx*dx+dy*dy+dz*dz)/30;s+=L.k/(1+q)}s=Math.min(s,1.3)}
+      let s=1;if(!glow){s=kind==='ceil'?.9:kind==='grid'?.8:.78;for(const L of this.lights){const dx=px-L.x,dy=py-L.y,dz=pz-L.z,q=(dx*dx+dy*dy+dz*dz)/30;s+=L.k/(1+q)}s=Math.min(s,1.3)}
       b.c.push(_c.r*s,_c.g*s,_c.b*s);
       if(kind==='wall'){if(Math.abs(nx)>.5)b.u.push(pz/2,py/H);else if(Math.abs(ny)>.5)b.u.push(px/2,pz/2);else b.u.push(px/2,py/H)}else b.u.push(px/2,pz/2)}
     for(let i=0;i<36;i++)b.i.push(BI[i]+base);
@@ -123,7 +136,7 @@ function wallWithDoor(B,ox,oz,axis,off,gap,color){const t=.3,lo=off-gap/2,hi=off
   seg(0,lo);seg(hi,tile);
   const lintel=(.6);axis===0?B.box(ox+off,H-lintel/2,oz,gap,lintel,t,color,false):B.box(ox,H-lintel/2,oz+off,t,lintel,gap,color,false)}
 function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const p=paletteAt(cx,cz);const ox=cx*tile,oz=cz*tile;
-const lights=[];for(let i=0;i<4;i++)lights.push({x:ox+4+(i%2)*8,y:H-.05,z:oz+4+Math.floor(i/2)*8,k:hash(cx,cz,i+30)<.18?.12:.55});
+const lights=[];for(let i=0;i<4;i++)lights.push({x:ox+4.5+(i%2)*8,y:H-.05,z:oz+4.25+Math.floor(i/2)*8,k:hash(cx,cz,i+30)<.18?.12:.55});
 const B=new Builder(lights),wall=p.wall,dark=0x4a3f1c;
 B.box(ox+8,-.18,oz+8,16,.36,16,p.floor,false,'floor');B.box(ox+8,H+.18,oz+8,16,.36,16,p.ceil,false,'ceil');
 // Each chunk owns its north (z) and west (x) walls; every wall has a doorway, so all cells connect, but it feels like a maze.
@@ -135,15 +148,21 @@ if(v<.3){B.box(ox+5,H/2,oz+10.5,.3,H,6,wall,true)}
 else if(v<.55){B.box(ox+10.5,H/2,oz+6,7,H,.3,wall,true)}
 else if(v<.7){for(const [dx,dz] of [[5,5],[11,11]])B.box(ox+dx,H/2,oz+dz,.7,H,.7,wall,true)}
 // Baseboards along the doorway-less walls give the wallpaper a seam.
-for(const L of lights)B.box(L.x,H-.03,L.z,1.6,.05,.5,p.light,false,'glow');
-const g=new THREE.Group();g.userData.walls=B.walls;for(const m of [B.mesh(B.b.wall,wallMat),B.mesh(B.b.floor,floorMat),B.mesh(B.b.ceil,ceilMat),B.mesh(B.b.glow,glowMat)])if(m){m.updateMatrix();g.add(m)}
+for(const L of lights)B.box(L.x,H-.012,L.z,.97,.02,.47,p.light,false,'glow');
+// Suspended T-bar grid: thin strips hanging just below the tiles so the ceiling has real depth.
+const gw=.028,gh=.018;for(let k=0;k<16;k++)B.box(ox+k,H-gh/2,oz+8,gw,gh,16,p.grid,false,'grid');for(let k=0;k<32;k++)B.box(ox+8,H-gh/2,oz+k*.5,16,gh,gw,p.grid,false,'grid');
+const g=new THREE.Group();g.userData.walls=B.walls;for(const m of [B.mesh(B.b.wall,wallMat),B.mesh(B.b.floor,floorMat),B.mesh(B.b.ceil,ceilMat),B.mesh(B.b.glow,glowMat),B.mesh(B.b.grid,gridMat)])if(m){m.updateMatrix();g.add(m)}
 scene.add(g);chunks.set(id,g)}
 function removeChunk(id,g){scene.remove(g);g.traverse(o=>o.geometry&&o.geometry.dispose());chunks.delete(id)}
-const statusEl=document.querySelector('#status');let lastCx=NaN,lastCz=NaN;
-function updateChunks(){const cx=Math.floor(camera.position.x/tile),cz=Math.floor(camera.position.z/tile);if(cx===lastCx&&cz===lastCz)return;lastCx=cx;lastCz=cz;
-for(let x=cx-range;x<=cx+range;x++)for(let z=cz-range;z<=cz+range;z++)addChunk(x,z);
-for(const [id,g] of [...chunks]){const [x,z]=id.split(',').map(Number);if(Math.abs(x-cx)>range||Math.abs(z-cz)>range)removeChunk(id,g)}
-statusEl.textContent=`SECTOR ${cx},${cz} · ${paletteAt(cx,cz).name} · ${chunks.size} CELLS ACTIVE`}
+const statusEl=document.querySelector('#status');let lastCx=NaN,lastCz=NaN,queue=[];
+function updateChunks(){const cx=Math.floor(camera.position.x/tile),cz=Math.floor(camera.position.z/tile);
+if(cx!==lastCx||cz!==lastCz){lastCx=cx;lastCz=cz;queue=[];
+  for(let x=cx-range;x<=cx+range;x++)for(let z=cz-range;z<=cz+range;z++)if(!chunks.has(x+','+z))queue.push([x,z]);
+  queue.sort((a,b)=>Math.hypot(b[0]-cx,b[1]-cz)-Math.hypot(a[0]-cx,a[1]-cz)); // nearest last -> pop()
+  for(let x=cx-1;x<=cx+1;x++)for(let z=cz-1;z<=cz+1;z++)addChunk(x,z); // collision neighbours always ready
+  for(const [id,g] of [...chunks]){const [x,z]=id.split(',').map(Number);if(Math.abs(x-cx)>range+1||Math.abs(z-cz)>range+1)removeChunk(id,g)}
+  statusEl.textContent=`SECTOR ${cx},${cz} · ${paletteAt(cx,cz).name}`}
+for(let n=0;n<2&&queue.length;n++){const [x,z]=queue.pop();addChunk(x,z)}}
 let hum;function startHum(){if(hum)return;try{const a=new (window.AudioContext||window.webkitAudioContext)(),g=a.createGain();g.gain.value=.05;g.connect(a.destination);for(const [f,v] of [[60,.5],[120,.3],[180,.12],[7200,.01]]){const o=a.createOscillator();o.type=f<200?'sawtooth':'sine';o.frequency.value=f;const og=a.createGain();og.gain.value=v;o.connect(og).connect(g);o.start()}hum=a}catch(e){console.warn('Audio unavailable',e)}}
 const look={yaw:0,pitch:0},view={yaw:0,pitch:0};const overlay=document.querySelector('#overlay'),start=document.querySelector('#start');let playing=false;start.onclick=async()=>{startHum();try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock();}catch(error){document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}};document.addEventListener('pointerlockchange',()=>{playing=document.pointerLockElement===renderer.domElement;overlay.style.display=playing?'none':'flex';start.textContent=playing?'ENTER THE ROOMS':'CONTINUE EXPLORING'});document.addEventListener('mousemove',e=>{if(!playing)return;look.yaw-=e.movementX*.002;look.pitch=Math.max(-1.48,Math.min(1.48,look.pitch-e.movementY*.002))});const keys=new Set();addEventListener('keydown',e=>{keys.add(e.code);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));addEventListener('blur',()=>keys.clear());camera.position.set(8,1.7,4);
 function collide(x,z){const cx=Math.floor(x/tile),cz=Math.floor(z/tile);for(let a=cx-1;a<=cx+1;a++)for(let b=cz-1;b<=cz+1;b++){const g=chunks.get(a+','+b);if(!g)continue;for(const w of g.userData.walls){if(Math.abs(x-w.x)<w.w/2+.37&&Math.abs(z-w.z)<w.d/2+.37)return true}}return false}
@@ -162,6 +181,6 @@ function handheld(now,dt,moving,running){const t=now/1000;moveAmt+=((moving?1:0)
   camera.rotation.set(view.pitch+sx+Math.cos(elapsed*2)*.009*moveAmt+Math.sin(t*37)*.012*jolt,view.yaw+sy+Math.cos(elapsed)*.008*moveAmt,roll+Math.sin(t*29)*.02*jolt,'YXZ');
   const f=78+Math.sin(t*.4)*.8+Math.sin(t*1.3)*.4-runAmt*3-jolt*1.5;if(Math.abs(camera.fov-f)>.01){camera.fov=f;camera.updateProjectionMatrix()}
   vhsMat.uniforms.shake.value=jolt+runAmt*.5}
-let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?8:4.4)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(keys.has('ShiftLeft')||keys.has('ShiftRight')?15:11);camera.position.y=1.7+Math.sin(elapsed)*.035}else camera.position.y+=(1.7-camera.position.y)*.12;updateChunks()}ambient.intensity=2.05+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(Math.random()<.015?-.25:0);const mv=playing&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight'));handheld(now,dt,mv,mv&&(keys.has('ShiftLeft')||keys.has('ShiftRight')));
-vhsMat.uniforms.time.value=now/1000%1000;renderer.setRenderTarget(rt);renderer.render(scene,camera);renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
+let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?4.6:2.5)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(keys.has('ShiftLeft')||keys.has('ShiftRight')?11:7.5);camera.position.y=1.7+Math.sin(elapsed)*.03}else camera.position.y+=(1.7-camera.position.y)*.12}updateChunks();ambient.intensity=2.25+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(Math.random()<.015?-.25:0);const mv=playing&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight'));handheld(now,dt,mv,mv&&(keys.has('ShiftLeft')||keys.has('ShiftRight')));
+vhsMat.uniforms.time.value=now/1000%1000;renderer.setRenderTarget(rt);renderer.render(scene,camera);renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();while(queue.length)updateChunks();requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
 </script></body></html>
