@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>THE BACKROOMS // v0.1</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#0c0a04;color:#dce3dc;font-family:monospace}canvas{display:block}#hud{position:fixed;top:20px;left:22px;pointer-events:none;text-shadow:0 2px 8px #000}#hud strong{font-size:15px;letter-spacing:3px}#status{font-size:11px;opacity:.7;margin-top:9px}#cross{position:fixed;left:50%;top:50%;width:4px;height:4px;border:1px solid #fff8;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}#overlay{position:fixed;inset:0;background:#0c0a04db;display:flex;align-items:center;justify-content:center;z-index:5}#panel{width:min(460px,85vw);padding:32px;border:1px solid #cbb85a55;background:#2a2410e8;box-shadow:0 20px 90px #000a}h1{letter-spacing:5px;font-size:25px}p{line-height:1.8;color:#acb9b7}button{padding:13px 23px;background:#d8c85a;border:0;color:#2a2410;font:700 13px monospace;cursor:pointer}button:hover{background:#fff}small{display:block;margin-top:20px;color:#82938e;line-height:1.8}#error{color:#ffb0a0}#vig{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,#0000 55%,#0002 80%,#0007 120%)}#grain{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;image-rendering:pixelated;opacity:.035;mix-blend-mode:overlay}</style></head><body><div id="hud"><strong>THE BACKROOMS <span style="opacity:.45">/ v0.1</span></strong><div id="status">SECTOR 0,0 · SIGNAL STABLE</div></div><canvas id="grain" width="480" height="270"></canvas><div id="vig"></div><div id="cross"></div><div id="overlay"><div id="panel"><h1>THE BACKROOMS</h1><p>If you're not careful and you noclip out of reality in the wrong areas, you'll end up in the Backrooms.</p><button id="start">ENTER THE ROOMS</button><small>WASD / arrow keys — move<br>MOUSE — look around<br>SHIFT — run · ESC — pause<br>Headphones recommended</small><p id="error"></p></div></div><script>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>THE BACKROOMS // v0.1</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#0c0a04;color:#dce3dc;font-family:monospace}canvas{display:block}#hud{position:fixed;top:20px;left:22px;pointer-events:none;text-shadow:0 2px 8px #000}#hud strong{font-size:15px;letter-spacing:3px}#status{font-size:11px;opacity:.7;margin-top:9px}#cross{position:fixed;left:50%;top:50%;width:4px;height:4px;border:1px solid #fff8;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}#overlay{position:fixed;inset:0;background:#0c0a04db;display:flex;align-items:center;justify-content:center;z-index:5}#panel{width:min(460px,85vw);padding:32px;border:1px solid #cbb85a55;background:#2a2410e8;box-shadow:0 20px 90px #000a}h1{letter-spacing:5px;font-size:25px}p{line-height:1.8;color:#acb9b7}button{padding:13px 23px;background:#d8c85a;border:0;color:#2a2410;font:700 13px monospace;cursor:pointer}button:hover{background:#fff}small{display:block;margin-top:20px;color:#82938e;line-height:1.8}#error{color:#ffb0a0}#cam{position:fixed;inset:0;pointer-events:none;font:22px/1.25 monospace;color:#f2f2ea;letter-spacing:2px;text-shadow:2px 0 #f006,-2px 0 #0ff5,0 0 6px #fff6}#rec{position:absolute;top:22px;right:28px;display:flex;align-items:center;gap:9px}#dot{width:13px;height:13px;border-radius:50%;background:#e22;box-shadow:0 0 8px #e22;animation:blink 1.2s steps(1) infinite}@keyframes blink{50%{opacity:0}}#stamp{position:absolute;left:28px;bottom:26px}#tc{position:absolute;right:28px;bottom:26px}@media(max-width:600px){#cam{font-size:15px}}</style></head><body><div id="hud"><strong>THE BACKROOMS <span style="opacity:.45">/ v0.1</span></strong><div id="status">SECTOR 0,0 · SIGNAL STABLE</div></div><div id="cam"><div id="rec"><i id="dot"></i>REC</div><div id="stamp">PLAY &#9654;<br><span id="date">OCT 31 1996 03:14:07</span></div><div id="tc">SP 0:00:00</div></div><div id="cross"></div><div id="overlay"><div id="panel"><h1>THE BACKROOMS</h1><p>If you're not careful and you noclip out of reality in the wrong areas, you'll end up in the Backrooms.</p><button id="start">ENTER THE ROOMS</button><small>WASD / arrow keys — move<br>MOUSE — look around<br>SHIFT — run · ESC — pause<br>Headphones recommended</small><p id="error"></p></div></div><script>
 window.addEventListener('error',event=>{const el=document.querySelector('#error');if(el)el.textContent='Startup error: '+(event.message||'Unknown error');});
 window.addEventListener('unhandledrejection',event=>{const el=document.querySelector('#error');if(el)el.textContent='Startup error: '+(event.reason?.message||String(event.reason));});
 </script><script type="module">
@@ -17,6 +17,54 @@ try {
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x2b2510);scene.fog=new THREE.FogExp2(0x2b2510,.05);
 const camera=new THREE.PerspectiveCamera(78,innerWidth/innerHeight,.05,80);camera.rotation.order='YXZ';
 const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
+// --- VHS post pass: scene renders into a half-float target, then a full-screen shader smears, wobbles, tints and vignettes it.
+const RES=.85,rt=new THREE.WebGLRenderTarget(2,2,{type:THREE.HalfFloatType,samples:4,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
+const vhsMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tDiffuse:{value:rt.texture},time:{value:0},res:{value:new THREE.Vector2(1,1)},shake:{value:0}},
+vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
+fragmentShader:`precision highp float;uniform sampler2D tDiffuse;uniform float time,shake;uniform vec2 res;varying vec2 vUv;
+float h11(float x){return fract(sin(x*127.1)*43758.5453);}
+float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float n1(float x){float i=floor(x),f=fract(x);f=f*f*(3.-2.*f);return mix(h11(i),h11(i+1.),f);}
+vec3 enc(vec3 c){return pow(max(c,0.),vec3(1./2.2));}
+void main(){
+  vec2 uv=vUv;
+  // slow tape wobble + head-switching noise along the bottom edge
+  float bot=smoothstep(.07,0.,uv.y);
+  float wob=sin(uv.y*16.+time*1.9)*.0007+sin(uv.y*3.+time*.7)*.0012+(n1(time*.6)-.5)*.0016;
+  wob+=bot*(h21(vec2(floor(uv.y*180.),floor(time*30.)))-.5)*.05;
+  // tracking error band that rolls up the picture now and then
+  float gate=smoothstep(.55,.85,n1(time*.35));
+  float by=fract(time*.11),bd=abs(uv.y-by);
+  float band=smoothstep(.05,0.,bd)*gate;
+  wob+=band*((h21(vec2(floor(uv.y*240.),floor(time*20.)))-.5)*.05+.012);
+  uv.x+=wob+shake*.0015*sin(uv.y*40.+time*60.);
+  uv.y+=shake*.002*sin(time*50.);
+  // horizontal chroma bleed (smeared luma, offset colour channels)
+  float px=1./res.x,ca=px*(2.2+bot*8.+band*10.);
+  vec3 col=vec3(0.);float ws=0.;
+  for(int k=-3;k<=3;k++){float w=exp(-float(k*k)*.22),o=float(k)*px*1.6;
+    col+=w*vec3(texture2D(tDiffuse,uv+vec2(o+ca,0.)).r,texture2D(tDiffuse,uv+vec2(o,0.)).g,texture2D(tDiffuse,uv+vec2(o-ca,0.)).b);ws+=w;}
+  col=enc(col/ws);
+  // washed-out tape colour: desaturate, lift blacks, warm/magenta cast, soft highlight bloom
+  float l=dot(col,vec3(.299,.587,.114));
+  col=mix(vec3(l),col,.78);
+  col=col*vec3(1.04,1.0,.9)*.92+vec3(.035,.03,.04);
+  col+=max(l-.72,0.)*vec3(.35,.3,.18);
+  // scanlines
+  col*=1.-.2*(.5+.5*sin(vUv.y*330.*6.2832));
+  // static grain, random bright dropout streaks, subtle brightness flicker
+  col+=(h21(vUv*res+fract(time)*91.)-.5)*.11;
+  float row=floor(vUv.y*260.);
+  if(h21(vec2(row,floor(time*25.)))>.9975)col+=.25*step(h21(vec2(row,7.)),.6);
+  col+=band*(h21(vUv*res*.5+time)-.35)*.45;
+  col*=1.+(h11(floor(time*24.))-.5)*.05;
+  // heavy vignette + darkened corners
+  vec2 q=(vUv-.5)*vec2(1.08,1.);float v=length(q)*1.35;
+  col*=1.-smoothstep(.35,1.0,v)*.92;
+  col*=smoothstep(0.,.03,vUv.y)*.35+.65;
+  gl_FragColor=vec4(col,1.);}`});
+const postScene=new THREE.Scene(),postCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),vhsMat));
+function sizePost(){const pr=renderer.getPixelRatio();rt.setSize(Math.max(2,Math.round(innerWidth*pr*RES)),Math.max(2,Math.round(innerHeight*pr*RES)));vhsMat.uniforms.res.value.set(innerWidth*pr,innerHeight*pr)}sizePost();
 // Lighting is baked into vertex colours (see Builder), so only cheap global lights are needed. No per-chunk PointLights.
 const ambient=new THREE.HemisphereLight(0xfff8d0,0xc8a860,2.1);scene.add(ambient);
 scene.add(camera);const torch=new THREE.PointLight(0xfff0c0,2.2,12,2);torch.position.set(0,.3,0);camera.add(torch);
@@ -97,10 +145,23 @@ for(let x=cx-range;x<=cx+range;x++)for(let z=cz-range;z<=cz+range;z++)addChunk(x
 for(const [id,g] of [...chunks]){const [x,z]=id.split(',').map(Number);if(Math.abs(x-cx)>range||Math.abs(z-cz)>range)removeChunk(id,g)}
 statusEl.textContent=`SECTOR ${cx},${cz} · ${paletteAt(cx,cz).name} · ${chunks.size} CELLS ACTIVE`}
 let hum;function startHum(){if(hum)return;try{const a=new (window.AudioContext||window.webkitAudioContext)(),g=a.createGain();g.gain.value=.05;g.connect(a.destination);for(const [f,v] of [[60,.5],[120,.3],[180,.12],[7200,.01]]){const o=a.createOscillator();o.type=f<200?'sawtooth':'sine';o.frequency.value=f;const og=a.createGain();og.gain.value=v;o.connect(og).connect(g);o.start()}hum=a}catch(e){console.warn('Audio unavailable',e)}}
-const overlay=document.querySelector('#overlay'),start=document.querySelector('#start');let playing=false;start.onclick=async()=>{startHum();try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock();}catch(error){document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}};document.addEventListener('pointerlockchange',()=>{playing=document.pointerLockElement===renderer.domElement;overlay.style.display=playing?'none':'flex';start.textContent=playing?'ENTER THE ROOMS':'CONTINUE EXPLORING'});document.addEventListener('mousemove',e=>{if(!playing)return;camera.rotation.y-=e.movementX*.002;camera.rotation.x=Math.max(-1.48,Math.min(1.48,camera.rotation.x-e.movementY*.002))});const keys=new Set();addEventListener('keydown',e=>{keys.add(e.code);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));addEventListener('blur',()=>keys.clear());camera.position.set(8,1.7,4);
+const look={yaw:0,pitch:0},view={yaw:0,pitch:0};const overlay=document.querySelector('#overlay'),start=document.querySelector('#start');let playing=false;start.onclick=async()=>{startHum();try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock();}catch(error){document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}};document.addEventListener('pointerlockchange',()=>{playing=document.pointerLockElement===renderer.domElement;overlay.style.display=playing?'none':'flex';start.textContent=playing?'ENTER THE ROOMS':'CONTINUE EXPLORING'});document.addEventListener('mousemove',e=>{if(!playing)return;look.yaw-=e.movementX*.002;look.pitch=Math.max(-1.48,Math.min(1.48,look.pitch-e.movementY*.002))});const keys=new Set();addEventListener('keydown',e=>{keys.add(e.code);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));addEventListener('blur',()=>keys.clear());camera.position.set(8,1.7,4);
 function collide(x,z){const cx=Math.floor(x/tile),cz=Math.floor(z/tile);for(let a=cx-1;a<=cx+1;a++)for(let b=cz-1;b<=cz+1;b++){const g=chunks.get(a+','+b);if(!g)continue;for(const w of g.userData.walls){if(Math.abs(x-w.x)<w.w/2+.37&&Math.abs(z-w.z)<w.d/2+.37)return true}}return false}
-// Film grain: tiny noise canvas, stretched by CSS and refreshed ~12x/s.
-const grainEl=document.querySelector('#grain'),gctx=grainEl.getContext('2d'),gimg=gctx.createImageData(480,270);let lastGrain=0;
-function updateGrain(now){if(now-lastGrain<80)return;lastGrain=now;const d=gimg.data;for(let i=0;i<d.length;i+=4){d[i]=d[i+1]=d[i+2]=Math.random()*255;d[i+3]=255}gctx.putImageData(gimg,0,0)}
-let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?8:4.4)*dt;const yaw=camera.rotation.y,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*11;camera.position.y=1.7+Math.sin(elapsed)*.035}else camera.position.y+=(1.7-camera.position.y)*.12;updateChunks()}ambient.intensity=2.05+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(Math.random()<.015?-.25:0);renderer.render(scene,camera);updateGrain(now)}updateChunks();requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+// Camcorder HUD clock + handheld camera state.
+const clockEl=document.querySelector('#date'),tcEl=document.querySelector('#tc'),pad=n=>String(n).padStart(2,'0'),t0=performance.now();let lastClock=-1;
+function updateClock(now){const sec=Math.floor((now-t0)/1000);if(sec===lastClock)return;lastClock=sec;const t=3*3600+14*60+7+sec;clockEl.textContent=`OCT 31 1996 ${pad(Math.floor(t/3600)%24)}:${pad(Math.floor(t/60)%60)}:${pad(t%60)}`;tcEl.textContent=`SP ${Math.floor(sec/3600)}:${pad(Math.floor(sec/60)%60)}:${pad(sec%60)}`}
+let moveAmt=0,runAmt=0,jolt=0;
+function handheld(now,dt,moving,running){const t=now/1000;moveAmt+=((moving?1:0)-moveAmt)*(1-Math.exp(-dt*5));runAmt+=((moving&&running?1:0)-runAmt)*(1-Math.exp(-dt*5));
+  if(Math.random()<dt*.18)jolt=.5+Math.random()*.7;jolt*=Math.exp(-dt*5);
+  const a=1+moveAmt*1.2+runAmt*1.6; // idle breathing -> walking -> running
+  // camera lags the mouse a little, like a heavy camcorder on a shoulder
+  const k=1-Math.exp(-dt*16);view.yaw+=(look.yaw-view.yaw)*k;view.pitch+=(look.pitch-view.pitch)*k;
+  const sx=(Math.sin(t*1.1)*.6+Math.sin(t*2.3+1.7)*.3+Math.sin(t*5.1)*.1)*.004*a,
+        sy=(Math.sin(t*.9+.5)*.6+Math.sin(t*1.9+3.1)*.3+Math.sin(t*4.3)*.1)*.005*a,
+        roll=Math.sin(t*.7)*.006+Math.sin(t*1.7+2.)*.003+Math.sin(elapsed*.5)*.014*moveAmt+Math.sin(elapsed*.5)*.012*runAmt;
+  camera.rotation.set(view.pitch+sx+Math.cos(elapsed*2)*.009*moveAmt+Math.sin(t*37)*.012*jolt,view.yaw+sy+Math.cos(elapsed)*.008*moveAmt,roll+Math.sin(t*29)*.02*jolt,'YXZ');
+  const f=78+Math.sin(t*.4)*.8+Math.sin(t*1.3)*.4-runAmt*3-jolt*1.5;if(Math.abs(camera.fov-f)>.01){camera.fov=f;camera.updateProjectionMatrix()}
+  vhsMat.uniforms.shake.value=jolt+runAmt*.5}
+let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?8:4.4)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(keys.has('ShiftLeft')||keys.has('ShiftRight')?15:11);camera.position.y=1.7+Math.sin(elapsed)*.035}else camera.position.y+=(1.7-camera.position.y)*.12;updateChunks()}ambient.intensity=2.05+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(Math.random()<.015?-.25:0);const mv=playing&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight'));handheld(now,dt,mv,mv&&(keys.has('ShiftLeft')||keys.has('ShiftRight')));
+vhsMat.uniforms.time.value=now/1000%1000;renderer.setRenderTarget(rt);renderer.render(scene,camera);renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
 </script></body></html>
