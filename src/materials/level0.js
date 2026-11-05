@@ -51,7 +51,7 @@ export const LEVEL0_DEFAULTS = {
   ceil: {
     id: 'MAT_03', label: 'Acoustic Ceiling', folder: 'ceiling',
     params: {
-      size: null,              // null = exactly one ceiling tile (opts.ceilTile) per repeat, so tile edges sit on the grid
+      size: null,              // null = exactly one ceiling panel (opts.ceilSize, 0.5 x 1.0 m) per repeat, so panel edges sit on the grid
       normalScale: 0.4, roughness: 1, paletteInfluence: 1, gain: 0.985, specular: 1,
       externalPaletteInfluence: 0, externalMacroColor: 0, deriveMaps: true,
       macroColor: 0.05, macroRoughness: 0.02,
@@ -172,7 +172,7 @@ function makePbrMaterial(THREE, kind, def, tex) {
 // Public factory.
 //   THREE      the Three.js namespace (index.html loads it dynamically, so it is injected)
 //   opts.renderer, opts.H          renderer (for anisotropy) and wall height in metres (wall V unit = one H)
-//   opts.ceilTile                  side of one square ceiling tile in metres (default 0.5)
+//   opts.ceilSize [w, l]           ceiling panel size in metres along x and z (default [0.5, 1])
 //   opts.legacy {wall,floor,ceil}  the original Lambert materials (kept unmodified as the comparison baseline)
 //   opts.procedural {wall,floor,ceil}  the original procedural base-colour CanvasTextures (reused as-is)
 //   opts.mode                      'pbr' (default) | 'legacy'
@@ -181,7 +181,7 @@ function makePbrMaterial(THREE, kind, def, tex) {
 // Returns synchronously with working materials; external textures stream in afterwards.
 // ---------------------------------------------------------------------------------------------------------------
 export function createLevel0Materials(THREE, opts) {
-  const { renderer, H, legacy, procedural } = opts, ceilTile = opts.ceilTile || 0.5;
+  const { renderer, H, legacy, procedural } = opts, ceilSize = opts.ceilSize || [0.5, 1];
   const manifestUrl = new URL(opts.manifestUrl || 'assets/textures/level0/manifest.json', document.baseURI).href;
   const aniso = renderer.capabilities.getMaxAnisotropy();
   const defs = {}, pbr = {}, tex = {}, state = {}, kindOf = new Map(), scaled = {};
@@ -209,7 +209,7 @@ export function createLevel0Materials(THREE, opts) {
     applyRepeat(kind);
   }
   // Size of one texture repeat in metres. UV units: 1 u = 2 m along walls/floor/ceiling; wall 1 v = H metres, floor/ceiling 1 v = 2 m.
-  function sizeOf(kind) { return defs[kind].params.size || (kind === 'ceil' ? [ceilTile, ceilTile] : [2, kind === 'wall' ? H : 2]); }
+  function sizeOf(kind) { return defs[kind].params.size || (kind === 'ceil' ? ceilSize : [2, kind === 'wall' ? H : 2]); }
   function applyRepeat(kind) { const s = sizeOf(kind); for (const t of scaled[kind]) t.repeat.set(2 / s[0], (kind === 'wall' ? H : 2) / s[1]); }
   KINDS.forEach(applyParams);
 
