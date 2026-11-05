@@ -1,7 +1,8 @@
 # Level 0 textures
 
-Placeholder / replacement slots for the Level 0 PBR materials. **Nothing in this folder is final art.**
-The game ships with deterministic procedural fallbacks for every slot, so these folders may stay empty.
+Slots for the Level 0 PBR materials. The three approved base-colour textures are wired in via `manifest.json`
+(`*_texture1024x1024_lvl0.jpg`); do not modify them without approval. The game still ships with deterministic procedural
+fallbacks for every slot, so a missing file only logs a warning.
 
 ```
 assets/textures/level0/
@@ -22,7 +23,7 @@ assets/textures/level0/
 | roughness   | `_roughness`   | linear       | Value read from the **green** channel, 0 = glossy, 1 = matte |
 
 Allowed extensions (the deploy workflow uploads these): `.png`, `.jpg`, `.jpeg`, `.webp`.
-Textures must tile seamlessly. Power-of-two sizes (1024 or 2048) are recommended.
+Textures must tile seamlessly. External base colours are shown with their own colours (no palette tint). Power-of-two sizes (1024 or 2048) are recommended.
 
 ## Replacing a texture
 

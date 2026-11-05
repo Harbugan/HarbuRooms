@@ -75,6 +75,9 @@ const ambient=new THREE.HemisphereLight(0xfff8d8,0xd8c490,2.3);scene.add(ambient
 scene.add(camera);const torch=new THREE.PointLight(0xfff0c0,2.2,12,2);torch.position.set(0,.3,0);camera.add(torch);
 // --- GEN START: pure, deterministic level layout (no Three.js) — every chunk can be rebuilt from its coordinates alone.
 const tile=16, N=16, range=4, chunks=new Map(), H=2.9, DOOR_TOP=2.25, CB=8; // 16 x 1 m cells per chunk, low oppressive ceiling
+// Ceiling tiles are SQUARES of CEIL_TILE metres (T-bar grid spacing, both directions). 0.5 keeps the 1 x 0.5 m light fixtures exactly 2 tiles.
+// ?ceilTile=0.25|0.5|1 overrides it. The ceiling texture repeats once per tile (see src/materials/level0.js).
+const CEIL_TILE=[.25,.5,1].includes(+new URLSearchParams(location.search).get('ceilTile'))?+new URLSearchParams(location.search).get('ceilTile'):.5;
 // Backrooms: yellowed wallpaper, damp carpet, stained ceiling tiles, sickly fluorescent light.
 const palettes=[
 {name:'LEVEL 0 — THE LOBBY',floor:0xc2aa76,wall:0xe2d05a,ceil:0xf2edcf,light:0xffffff,grid:0xf6f2dc},
@@ -191,16 +194,16 @@ const floorTex=makeTex(512,512,22,(g,w,h,r)=>{g.fillStyle='#f3ece0';g.fillRect(0
   for(let i=0;i<14000;i++){g.fillStyle=r()<.5?'rgba(60,30,0,.14)':'rgba(255,240,210,.16)';g.fillRect(r()*w,r()*h,2,2)}
   for(let i=0;i<5;i++){const x=r()*w,y=r()*h,rad=80+r()*120;for(const ox of [-w,0,w])for(const oy of [-h,0,h]){const gr=g.createRadialGradient(x+ox,y+oy,0,x+ox,y+oy,rad);gr.addColorStop(0,'rgba(60,35,0,.06)');gr.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=gr;g.fillRect(x+ox-rad,y+oy-rad,rad*2,rad*2)}}
   grain(g,w,h,r,22)});
-// Ceiling: 2 m x 2 m = 2x4 acoustic tiles (1 m x 0.5 m). Real T-bar grid geometry sits on the seams (see addChunk);
+// Ceiling: 2 m x 2 m = (2/CEIL_TILE)^2 square acoustic tiles. Real T-bar grid geometry sits on the seams (see addChunk);
 // the texture adds fissured/pinhole surface, a soft recessed shadow inside each tile edge and the odd water stain.
-const ceilTex=makeTex(512,512,33,(g,w,h,r)=>{g.fillStyle='#f3f0dc';g.fillRect(0,0,w,h);const TW=256,TH=128;
-  for(let tx=0;tx<2;tx++)for(let ty=0;ty<4;ty++){const x0=tx*TW,y0=ty*TH,tone=(r()-.5)*14;
+const ceilTex=makeTex(512,512,33,(g,w,h,r)=>{g.fillStyle='#f3f0dc';g.fillRect(0,0,w,h);const NT=Math.round(2/CEIL_TILE),TW=512/NT,TH=TW,sc=TW*TH/32768;
+  for(let tx=0;tx<NT;tx++)for(let ty=0;ty<NT;ty++){const x0=tx*TW,y0=ty*TH,tone=(r()-.5)*14;
     g.fillStyle=`rgba(${tone>0?255:90},${tone>0?250:80},${tone>0?220:30},${Math.abs(tone)/100})`;g.fillRect(x0,y0,TW,TH);
     // fissures: short random worm-like strokes
-    g.lineCap='round';for(let i=0;i<70;i++){const x=x0+8+r()*(TW-16),y=y0+8+r()*(TH-16),a=r()*6.28,l=2+r()*7;g.strokeStyle=`rgba(80,70,30,${.12+r()*.16})`;g.lineWidth=1+r()*1.4;g.beginPath();g.moveTo(x,y);g.quadraticCurveTo(x+Math.cos(a+1)*l*.6,y+Math.sin(a+1)*l*.6,x+Math.cos(a)*l,y+Math.sin(a)*l);g.stroke()}
-    g.fillStyle='rgba(70,62,25,.22)';for(let i=0;i<260;i++)g.fillRect(x0+5+r()*(TW-10),y0+5+r()*(TH-10),1.5,1.5);
+    g.lineCap='round';for(let i=0,n=Math.round(70*sc);i<n;i++){const x=x0+8+r()*(TW-16),y=y0+8+r()*(TH-16),a=r()*6.28,l=2+r()*7;g.strokeStyle=`rgba(80,70,30,${.12+r()*.16})`;g.lineWidth=1+r()*1.4;g.beginPath();g.moveTo(x,y);g.quadraticCurveTo(x+Math.cos(a+1)*l*.6,y+Math.sin(a+1)*l*.6,x+Math.cos(a)*l,y+Math.sin(a)*l);g.stroke()}
+    g.fillStyle='rgba(70,62,25,.22)';for(let i=0,n=Math.round(260*sc);i<n;i++)g.fillRect(x0+5+r()*(TW-10),y0+5+r()*(TH-10),1.5,1.5);
     // recessed edge: tile sits a few mm above the grid, so its edges fall into shadow
-    const e=10;for(const [gx0,gy0,gx1,gy1,rx,ry,rw,rh] of [[x0,0,x0+e,0,x0,y0,e,TH],[x0+TW,0,x0+TW-e,0,x0+TW-e,y0,e,TH],[0,y0,0,y0+e,x0,y0,TW,e],[0,y0+TH,0,y0+TH-e,x0,y0+TH-e,TW,e]]){
+    const e=Math.max(4,Math.round(10*TW/256));for(const [gx0,gy0,gx1,gy1,rx,ry,rw,rh] of [[x0,0,x0+e,0,x0,y0,e,TH],[x0+TW,0,x0+TW-e,0,x0+TW-e,y0,e,TH],[0,y0,0,y0+e,x0,y0,TW,e],[0,y0+TH,0,y0+TH-e,x0,y0+TH-e,TW,e]]){
       const gr=g.createLinearGradient(gx0,gy0,gx1,gy1);gr.addColorStop(0,'rgba(60,52,18,.30)');gr.addColorStop(1,'rgba(60,52,18,0)');g.fillStyle=gr;g.fillRect(rx,ry,rw,rh)}
     if(r()<.18){const x=x0+30+r()*(TW-60),y=y0+30+r()*(TH-60),rad=25+r()*35,gr=g.createRadialGradient(x,y,0,x,y,rad);gr.addColorStop(0,'rgba(140,105,30,.16)');gr.addColorStop(.85,'rgba(140,105,30,.10)');gr.addColorStop(1,'rgba(120,85,20,0)');g.fillStyle=gr;g.fillRect(x-rad,y-rad,rad*2,rad*2)}}
   grain(g,w,h,r,9)});
@@ -209,24 +212,24 @@ const mat=map=>new THREE.MeshLambertMaterial({vertexColors:true,map}),wallMat=ma
 // MATS is what chunk meshes are built with. ?materials=legacy starts on the original look; F8 toggles live (chunks are re-pointed, no rebuild).
 const MATS={wall:wallMat,floor:floorMat,ceil:ceilMat};let matSystem=null;
 try{const {createLevel0Materials}=await import('./src/materials/level0.js'),q=new URLSearchParams(location.search);
-  matSystem=createLevel0Materials(THREE,{renderer,H,legacy:{wall:wallMat,floor:floorMat,ceil:ceilMat},procedural:{wall:wallTex,floor:floorTex,ceil:ceilTex},mode:q.get('materials'),manifestUrl:q.get('materialManifest')||undefined,
+  matSystem=createLevel0Materials(THREE,{renderer,H,ceilTile:CEIL_TILE,legacy:{wall:wallMat,floor:floorMat,ceil:ceilMat},procedural:{wall:wallTex,floor:floorTex,ceil:ceilTex},mode:q.get('materials'),manifestUrl:q.get('materialManifest')||undefined,
     onModeChange:active=>Object.assign(MATS,active)});Object.assign(MATS,matSystem.active);window.NULLROOMS_MATERIALS=matSystem;
 }catch(e){console.warn('Material system unavailable; using legacy materials',e)}
 const _box=new THREE.BoxGeometry(1,1,1),BP=_box.attributes.position.array,BN=_box.attributes.normal.array,BI=_box.index.array,_c=new THREE.Color();
 // Merges all boxes of a chunk into one lit + one glow geometry, baking ceiling-light pools into vertex colours.
 class Builder{
-  constructor(lights,dim=1){this.lights=lights;this.dim=dim;this.b={};for(const k of ['wall','floor','ceil','glow','grid'])this.b[k]={p:[],n:[],c:[],u:[],i:[]};this.walls=[]}
+  constructor(lights,dim=1){this.lights=lights;this.dim=dim;this.b={};for(const k of ['wall','floor','ceil','glow','grid'])this.b[k]={p:[],n:[],c:[],l:[],u:[],i:[]};this.walls=[]}
   // kind: wall | floor | ceil | glow | grid. UVs are world-space so textures run seamlessly across merged boxes.
   // Wall V = py*vs+vo (default: one wallpaper repeat per H, baseboard at the floor).
   box(x,y,z,w,h,d,color,collide=false,kind='wall',vs=1/H,vo=0){
     const b=this.b[kind],glow=kind==='glow',base=b.p.length/3;_c.set(color);
     for(let v=0;v<24;v++){const nx=BN[v*3],ny=BN[v*3+1],px=BP[v*3]*w+x,py=BP[v*3+1]*h+y,pz=BP[v*3+2]*d+z;b.p.push(px,py,pz);b.n.push(nx,ny,BN[v*3+2]);
       let s=1;if(!glow){s=kind==='ceil'?.9:kind==='grid'?.8:.78;for(const L of this.lights){const dx=px-L.x,dy=py-L.y,dz=pz-L.z,q=dx*dx+dy*dy+dz*dz;if(q<70)s+=L.k/(1+q/9)}s=Math.min(s,1.3)*this.dim}
-      b.c.push(_c.r*s,_c.g*s,_c.b*s);
+      b.c.push(_c.r*s,_c.g*s,_c.b*s);b.l.push(s); // l = light level alone (no palette hue), used by external textures
       if(kind==='wall'){const vv=py*vs+vo;if(Math.abs(nx)>.5)b.u.push(pz/2,vv);else if(Math.abs(ny)>.5)b.u.push(px/2,pz/2);else b.u.push(px/2,vv)}else b.u.push(px/2,pz/2)}
     for(let i=0;i<36;i++)b.i.push(BI[i]+base);
     if(collide)this.walls.push({x,z,w,d})}
-  mesh(b,m){if(!b.p.length)return null;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(b.p,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(b.n,3));g.setAttribute('color',new THREE.Float32BufferAttribute(b.c,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(b.u,2));g.setIndex(b.i);g.computeBoundingSphere();const o=new THREE.Mesh(g,m);o.matrixAutoUpdate=false;return o}
+  mesh(b,m){if(!b.p.length)return null;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(b.p,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(b.n,3));g.setAttribute('color',new THREE.Float32BufferAttribute(b.c,3));g.setAttribute('aLight',new THREE.Float32BufferAttribute(b.l,1));g.setAttribute('uv',new THREE.Float32BufferAttribute(b.u,2));g.setIndex(b.i);g.computeBoundingSphere();const o=new THREE.Mesh(g,m);o.matrixAutoUpdate=false;return o}
 }
 // Vertical wall slab from y0 to y1. Above the normal ceiling height the wallpaper is remapped so tall walls never repeat the baseboard.
 function slab(B,x,z,w,d,y0,y1,color){const lo=Math.min(y1,H);if(lo>y0+.001)B.box(x,(y0+lo)/2,z,w,lo-y0,d,color);
@@ -251,8 +254,8 @@ function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const L=lay
     if(ax)slab(B,ox+line,oz+m,.3,l,DOOR_TOP,h,wall);else slab(B,ox+m,oz+line,l,.3,DOOR_TOP,h,wall)}
   for(const [x,z,s] of L.pillars){slab(B,ox+x,oz+z,s,s,0,Hc,wall);B.walls.push({x:ox+x,z:oz+z,w:s,d:s})}
   for(const l of L.lights)B.box(l.x,Hc-.012,l.z,.97,.02,.47,l.c,false,'glow');
-  // Suspended T-bar grid: thin strips hanging just below the tiles so the ceiling has real depth.
-  const gw=.028,gh=.018;for(let k=0;k<16;k++)B.box(ox+k,Hc-gh/2,oz+8,gw,gh,16,p.grid,false,'grid');for(let k=0;k<32;k++)B.box(ox+8,Hc-gh/2,oz+k*.5,16,gh,gw,p.grid,false,'grid');
+  // Suspended T-bar grid: thin strips hanging just below the tiles so the ceiling has real depth. Same spacing both ways = square tiles.
+  const gw=.028,gh=.018;for(let k=0,n=Math.round(N/CEIL_TILE);k<n;k++){B.box(ox+k*CEIL_TILE,Hc-gh/2,oz+8,gw,gh,16,p.grid,false,'grid');B.box(ox+8,Hc-gh/2,oz+k*CEIL_TILE,16,gh,gw,p.grid,false,'grid')}
   const g=new THREE.Group();g.userData.walls=B.walls;for(const m of [B.mesh(B.b.wall,MATS.wall),B.mesh(B.b.floor,MATS.floor),B.mesh(B.b.ceil,MATS.ceil),B.mesh(B.b.glow,glowMat),B.mesh(B.b.grid,gridMat)])if(m){m.updateMatrix();g.add(m)}
   scene.add(g);chunks.set(id,g)}
 function removeChunk(id,g){scene.remove(g);g.traverse(o=>o.geometry&&o.geometry.dispose());chunks.delete(id)}
