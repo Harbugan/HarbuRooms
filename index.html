@@ -205,6 +205,13 @@ const ceilTex=makeTex(512,512,33,(g,w,h,r)=>{g.fillStyle='#f3f0dc';g.fillRect(0,
     if(r()<.18){const x=x0+30+r()*(TW-60),y=y0+30+r()*(TH-60),rad=25+r()*35,gr=g.createRadialGradient(x,y,0,x,y,rad);gr.addColorStop(0,'rgba(140,105,30,.16)');gr.addColorStop(.85,'rgba(140,105,30,.10)');gr.addColorStop(1,'rgba(120,85,20,0)');g.fillStyle=gr;g.fillRect(x-rad,y-rad,rad*2,rad*2)}}
   grain(g,w,h,r,9)});
 const mat=map=>new THREE.MeshLambertMaterial({vertexColors:true,map}),wallMat=mat(wallTex),floorMat=mat(floorTex),ceilMat=mat(ceilTex),glowMat=new THREE.MeshBasicMaterial({vertexColors:true}),gridMat=new THREE.MeshLambertMaterial({vertexColors:true});
+// --- Material system v0.2 (src/materials/level0.js, docs/MATERIALS.md). The Lambert materials above stay as the "legacy" baseline.
+// MATS is what chunk meshes are built with. ?materials=legacy starts on the original look; F8 toggles live (chunks are re-pointed, no rebuild).
+const MATS={wall:wallMat,floor:floorMat,ceil:ceilMat};let matSystem=null;
+try{const {createLevel0Materials}=await import('./src/materials/level0.js'),q=new URLSearchParams(location.search);
+  matSystem=createLevel0Materials(THREE,{renderer,H,legacy:{wall:wallMat,floor:floorMat,ceil:ceilMat},procedural:{wall:wallTex,floor:floorTex,ceil:ceilTex},mode:q.get('materials'),manifestUrl:q.get('materialManifest')||undefined,
+    onModeChange:active=>Object.assign(MATS,active)});Object.assign(MATS,matSystem.active);window.NULLROOMS_MATERIALS=matSystem;
+}catch(e){console.warn('Material system unavailable; using legacy materials',e)}
 const _box=new THREE.BoxGeometry(1,1,1),BP=_box.attributes.position.array,BN=_box.attributes.normal.array,BI=_box.index.array,_c=new THREE.Color();
 // Merges all boxes of a chunk into one lit + one glow geometry, baking ceiling-light pools into vertex colours.
 class Builder{
@@ -246,7 +253,7 @@ function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const L=lay
   for(const l of L.lights)B.box(l.x,Hc-.012,l.z,.97,.02,.47,l.c,false,'glow');
   // Suspended T-bar grid: thin strips hanging just below the tiles so the ceiling has real depth.
   const gw=.028,gh=.018;for(let k=0;k<16;k++)B.box(ox+k,Hc-gh/2,oz+8,gw,gh,16,p.grid,false,'grid');for(let k=0;k<32;k++)B.box(ox+8,Hc-gh/2,oz+k*.5,16,gh,gw,p.grid,false,'grid');
-  const g=new THREE.Group();g.userData.walls=B.walls;for(const m of [B.mesh(B.b.wall,wallMat),B.mesh(B.b.floor,floorMat),B.mesh(B.b.ceil,ceilMat),B.mesh(B.b.glow,glowMat),B.mesh(B.b.grid,gridMat)])if(m){m.updateMatrix();g.add(m)}
+  const g=new THREE.Group();g.userData.walls=B.walls;for(const m of [B.mesh(B.b.wall,MATS.wall),B.mesh(B.b.floor,MATS.floor),B.mesh(B.b.ceil,MATS.ceil),B.mesh(B.b.glow,glowMat),B.mesh(B.b.grid,gridMat)])if(m){m.updateMatrix();g.add(m)}
   scene.add(g);chunks.set(id,g)}
 function removeChunk(id,g){scene.remove(g);g.traverse(o=>o.geometry&&o.geometry.dispose());chunks.delete(id)}
 const statusEl=document.querySelector('#status');let lastCx=NaN,lastCz=NaN,queue=[];
@@ -341,7 +348,7 @@ exitBtn.onclick=()=>{hasStarted=false;showSettings=false;keys.clear();look.yaw=v
 start.onclick=async()=>{showSettings=false;startHum();try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock()}catch(error){document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}};
 document.addEventListener('pointerlockchange',()=>{playing=document.pointerLockElement===renderer.domElement;if(playing){hasStarted=true;overlay.style.display='none'}else{keys.clear();showMenu()}});
 document.addEventListener('mousemove',e=>{if(!playing)return;const factor=.002*settings.sensitivity/50;look.yaw-=e.movementX*factor;look.pitch=Math.max(-1.48,Math.min(1.48,look.pitch-e.movementY*factor))});
-const keys=new Set();addEventListener('keydown',e=>{if(!playing)return;keys.add(e.code);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));addEventListener('blur',()=>keys.clear());camera.position.set(8,1.7,4);showMenu();
+const keys=new Set();addEventListener('keydown',e=>{if(!playing)return;keys.add(e.code);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));addEventListener('keydown',e=>{if(e.code==='F8'&&matSystem){e.preventDefault();matSystem.toggle(scene);console.info('[materials] mode:',matSystem.mode)}});addEventListener('blur',()=>keys.clear());camera.position.set(8,1.7,4);showMenu();
 function collide(x,z){const cx=Math.floor(x/tile),cz=Math.floor(z/tile);for(let a=cx-1;a<=cx+1;a++)for(let b=cz-1;b<=cz+1;b++){const g=chunks.get(a+','+b);if(!g)continue;for(const w of g.userData.walls){if(Math.abs(x-w.x)<w.w/2+.37&&Math.abs(z-w.z)<w.d/2+.37)return true}}return false}
 // Spawn on the first free spot spiralling out from the middle of chunk 0,0.
 function findSpawn(){for(let r=0;r<8;r+=.5)for(let a=0;a<24;a++){const x=8+Math.cos(a/24*6.2832)*r,z=8+Math.sin(a/24*6.2832)*r;if(!collide(x,z))return [x,z]}return [8.5,8.5]}

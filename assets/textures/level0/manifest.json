@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "note": "Set a texture path (relative to this file) to replace that channel. null = built-in procedural fallback. Placeholders only: nothing here is final art.",
+  "materials": {
+    "wallpaper": {
+      "textures": { "baseColor": null, "normal": null, "roughness": null },
+      "params": { "size": [2, 2.9] }
+    },
+    "carpet": {
+      "textures": { "baseColor": null, "normal": null, "roughness": null },
+      "params": { "size": [2, 2] }
+    },
+    "ceiling": {
+      "textures": { "baseColor": null, "normal": null, "roughness": null },
+      "params": { "size": [2, 2] }
+    }
+  }
+}
