@@ -12,6 +12,8 @@
 //    depends on any asset file.
 //  * Materials and textures are created once and shared by every chunk (no per-chunk materials, no extra draw calls).
 //  * Large-surface repetition is broken with a tiny world-space "macro" shader term, not by touching UVs.
+//  * External base-colour textures are shown with their own colours: the baked palette hue is dropped (only the baked
+//    light level is kept) and the macro colour drift is off. Both are configurable (externalPaletteInfluence / externalMacroColor).
 
 const wrap = (i, n) => ((i % n) + n) % n;
 
@@ -23,6 +25,9 @@ export const LEVEL0_DEFAULTS = {
     id: 'MAT_01', label: 'Yellowed Wallpaper', folder: 'wallpaper',
     params: {
       size: null,              // metres covered by ONE repeat of an external texture [width, height]; null = [2, wall height]
+      externalPaletteInfluence: 0, // paletteInfluence used once an external base colour is loaded (0 = texture keeps its own colours)
+      externalMacroColor: 0,   // macroColor used once an external base colour is loaded (0 = no colour drift)
+      deriveMaps: true,        // external base colour but no external normal / roughness: derive them from it instead of keeping the old procedural ones
       normalScale: 0.28,       // strength of the normal map (subtle paper tooth / printed relief)
       roughness: 1,            // multiplier on the roughness map (map holds absolute values, glTF convention)
       paletteInfluence: 1,     // 1 = vertex colour tints the map exactly like the legacy material; 0 = vertex colour only dims it
@@ -37,6 +42,7 @@ export const LEVEL0_DEFAULTS = {
     id: 'MAT_02', label: 'Damp Office Carpet', folder: 'carpet',
     params: {
       size: [2, 2], normalScale: 0.6, roughness: 1, paletteInfluence: 1, gain: 0.985, specular: 1,
+      externalPaletteInfluence: 0, externalMacroColor: 0, deriveMaps: true,
       macroColor: 0.07, macroRoughness: 0.07,
     },
     macro: { plane: 'xz', scales: [4.3, 11.7], tint: [0.9, 0.95, 1.0], seed: [12.3, 5.5] },
@@ -45,7 +51,9 @@ export const LEVEL0_DEFAULTS = {
   ceil: {
     id: 'MAT_03', label: 'Acoustic Ceiling', folder: 'ceiling',
     params: {
-      size: [2, 2], normalScale: 0.4, roughness: 1, paletteInfluence: 1, gain: 0.985, specular: 1,
+      size: null,              // null = exactly one ceiling tile (opts.ceilTile) per repeat, so tile edges sit on the grid
+      normalScale: 0.4, roughness: 1, paletteInfluence: 1, gain: 0.985, specular: 1,
+      externalPaletteInfluence: 0, externalMacroColor: 0, deriveMaps: true,
       macroColor: 0.05, macroRoughness: 0.02,
     },
     macro: { plane: 'xz', scales: [6.1, 14.9], tint: [0.55, 0.8, 1.0], seed: [7.7, 1.3] },
@@ -114,7 +122,7 @@ function deriveProceduralMaps(baseCanvas, p) {
 // ---------------------------------------------------------------------------------------------------------------
 const GLSL_COMMON = /* glsl */`
 uniform vec3 uMacroTint; uniform vec2 uMacroScale, uMacroSeed, uMacroAmp; uniform float uPalette, uGain, uSpec;
-varying vec3 vMacroP;
+varying vec3 vMacroP; varying float vLight;
 float mHash(vec2 p){vec3 q=fract(vec3(p.xyx)*.1031);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}
 float mNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(mHash(i),mHash(i+vec2(1.,0.)),f.x),mix(mHash(i+vec2(0.,1.)),mHash(i+vec2(1.,1.)),f.x),f.y);}
 float macroField(vec3 P){
@@ -128,7 +136,7 @@ float macroField(vec3 P){
 const GLSL_COLOR = /* glsl */`
 float macroV=macroField(vMacroP);
 #ifdef USE_COLOR
-  diffuseColor.rgb*=mix(vec3(dot(vColor,vec3(.2126,.7152,.0722))),vColor,uPalette);
+  diffuseColor.rgb*=mix(vec3(vLight),vColor,uPalette); // vLight = baked light level without the palette hue
 #endif
 diffuseColor.rgb*=uGain*(1.+uMacroAmp.x*macroV*uMacroTint);
 `;
@@ -149,7 +157,7 @@ function makePbrMaterial(THREE, kind, def, tex) {
   m.userData.uniforms = u;
   m.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, u);
-    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vMacroP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvMacroP=position;');
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vMacroP; attribute float aLight; varying float vLight;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvMacroP=position; vLight=aLight;');
     shader.fragmentShader = (def.macro.plane === 'wall' ? '#define MACRO_WALL\n' : '') + shader.fragmentShader
       .replace('#include <common>', '#include <common>\n' + GLSL_COMMON)
       .replace('#include <color_fragment>', GLSL_COLOR)
@@ -164,6 +172,7 @@ function makePbrMaterial(THREE, kind, def, tex) {
 // Public factory.
 //   THREE      the Three.js namespace (index.html loads it dynamically, so it is injected)
 //   opts.renderer, opts.H          renderer (for anisotropy) and wall height in metres (wall V unit = one H)
+//   opts.ceilTile                  side of one square ceiling tile in metres (default 0.5)
 //   opts.legacy {wall,floor,ceil}  the original Lambert materials (kept unmodified as the comparison baseline)
 //   opts.procedural {wall,floor,ceil}  the original procedural base-colour CanvasTextures (reused as-is)
 //   opts.mode                      'pbr' (default) | 'legacy'
@@ -172,10 +181,10 @@ function makePbrMaterial(THREE, kind, def, tex) {
 // Returns synchronously with working materials; external textures stream in afterwards.
 // ---------------------------------------------------------------------------------------------------------------
 export function createLevel0Materials(THREE, opts) {
-  const { renderer, H, legacy, procedural } = opts;
+  const { renderer, H, legacy, procedural } = opts, ceilTile = opts.ceilTile || 0.5;
   const manifestUrl = new URL(opts.manifestUrl || 'assets/textures/level0/manifest.json', document.baseURI).href;
   const aniso = renderer.capabilities.getMaxAnisotropy();
-  const defs = {}, pbr = {}, tex = {}, state = {}, kindOf = new Map();
+  const defs = {}, pbr = {}, tex = {}, state = {}, kindOf = new Map(), scaled = {};
 
   for (const kind of KINDS) {
     const def = defs[kind] = { ...LEVEL0_DEFAULTS[kind], params: { ...LEVEL0_DEFAULTS[kind].params } };
@@ -186,7 +195,7 @@ export function createLevel0Materials(THREE, opts) {
       t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; return t;
     };
     tex[kind] = { baseColor: base, normal: mk(normalCanvas, false), roughness: mk(roughnessCanvas, false) };
-    state[kind] = { baseColor: 'procedural', normal: 'procedural', roughness: 'procedural' };
+    state[kind] = { baseColor: 'procedural', normal: 'procedural', roughness: 'procedural' }; scaled[kind] = new Set();
     pbr[kind] = makePbrMaterial(THREE, kind, def, tex[kind]);
     kindOf.set(pbr[kind], kind); kindOf.set(legacy[kind], kind);
   }
@@ -194,8 +203,14 @@ export function createLevel0Materials(THREE, opts) {
   function applyParams(kind) {
     const { params: p } = defs[kind], m = pbr[kind], u = m.userData.uniforms;
     m.normalScale.set(p.normalScale, p.normalScale); m.roughness = p.roughness;
-    u.uMacroAmp.value.set(p.macroColor, p.macroRoughness); u.uPalette.value = p.paletteInfluence; u.uGain.value = p.gain; u.uSpec.value = p.specular;
+    const ext = state[kind].baseColor === 'external';
+    u.uMacroAmp.value.set(ext ? p.externalMacroColor : p.macroColor, p.macroRoughness); u.uPalette.value = ext ? p.externalPaletteInfluence : p.paletteInfluence;
+    u.uGain.value = p.gain; u.uSpec.value = p.specular;
+    applyRepeat(kind);
   }
+  // Size of one texture repeat in metres. UV units: 1 u = 2 m along walls/floor/ceiling; wall 1 v = H metres, floor/ceiling 1 v = 2 m.
+  function sizeOf(kind) { return defs[kind].params.size || (kind === 'ceil' ? [ceilTile, ceilTile] : [2, kind === 'wall' ? H : 2]); }
+  function applyRepeat(kind) { const s = sizeOf(kind); for (const t of scaled[kind]) t.repeat.set(2 / s[0], (kind === 'wall' ? H : 2) / s[1]); }
   KINDS.forEach(applyParams);
 
   let mode = opts.mode === 'legacy' ? 'legacy' : 'pbr';
@@ -216,7 +231,7 @@ export function createLevel0Materials(THREE, opts) {
       mode = next; refresh(); if (root) api.apply(root); if (opts.onModeChange) opts.onModeChange(active, mode); return mode;
     },
     // Live tuning from the console, e.g. NULLROOMS_MATERIALS.setParams('floor',{normalScale:.8}). Not persisted.
-    setParams(kind, p) { Object.assign(defs[kind].params, p); applyParams(kind); },
+    setParams(kind, p) { Object.assign(defs[kind].params, p); applyParams(kind); }, // also live: { size: [1.5, 1.5] }
     toggle(root) { return api.setMode(mode === 'pbr' ? 'legacy' : 'pbr', root); },
     ready: null,
   };
@@ -224,20 +239,37 @@ export function createLevel0Materials(THREE, opts) {
   // --- external assets -----------------------------------------------------------------------------------------
   const loader = new THREE.TextureLoader();
   const load = url => new Promise((res, rej) => loader.load(url, res, undefined, rej));
+  const KEY = { baseColor: 'map', normal: 'normalMap', roughness: 'roughnessMap' };
+  function assign(kind, channel, t, how) {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso;
+    t.colorSpace = channel === 'baseColor' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    scaled[kind].add(t); pbr[kind][KEY[channel]] = t; pbr[kind].needsUpdate = true; state[kind][channel] = how;
+  }
+  // External base colour but no external normal / roughness: derive them from the new image so relief matches what is painted.
+  function deriveFromExternal(kind, img) {
+    const c = newCanvas(img.naturalWidth || img.width, img.naturalHeight || img.height); c.getContext('2d').drawImage(img, 0, 0);
+    const { normalCanvas, roughnessCanvas } = deriveProceduralMaps(c, defs[kind].proc);
+    for (const [ch, cv] of [['normal', normalCanvas], ['roughness', roughnessCanvas]])
+      if (state[kind][ch] === 'procedural') assign(kind, ch, new THREE.CanvasTexture(cv), 'derived');
+  }
   async function loadChannel(kind, channel, rel, baseUrl) {
     const url = new URL(rel, baseUrl).href;
     try {
-      const t = await load(url), p = defs[kind].params;
-      const size = p.size || [2, kind === 'wall' ? H : 2];
-      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso;
-      t.colorSpace = channel === 'baseColor' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-      // UV units: 1 u = 2 m along walls/floor/ceiling; wall 1 v = H metres, floor/ceiling 1 v = 2 m.
-      t.repeat.set(2 / size[0], (kind === 'wall' ? H : 2) / size[1]);
-      const key = { baseColor: 'map', normal: 'normalMap', roughness: 'roughnessMap' }[channel];
-      pbr[kind][key] = t; pbr[kind].needsUpdate = true; state[kind][channel] = 'external';
+      const t = await load(url);
+      assign(kind, channel, t, 'external');
+      if (channel === 'baseColor' && defs[kind].params.deriveMaps) deriveFromExternal(kind, t.image);
+      applyParams(kind); // external base colour switches palette / macro influence and sets the repeat
     } catch (e) {
       state[kind][channel] = 'failed';
       console.warn(`[materials] ${kind}.${channel}: could not load ${url}; using procedural fallback`);
+    }
+  }
+  // ?wallSize=1.2  ?floorSize=1x1.5  ?ceilSize=0.5   metres per texture repeat; wins over the manifest.
+  function applyQuerySizes() {
+    const q = new URLSearchParams(location.search);
+    for (const kind of KINDS) {
+      const n = (q.get(kind + 'Size') || '').split(/[x,]/).map(Number).filter(v => v > 0);
+      if (n.length) { defs[kind].params.size = [n[0], n[n.length > 1 ? 1 : 0]]; applyParams(kind); }
     }
   }
   api.ready = (async () => {
@@ -246,7 +278,7 @@ export function createLevel0Materials(THREE, opts) {
       const r = await fetch(manifestUrl, { cache: 'no-cache' });
       if (r.ok) manifest = await r.json(); else console.info(`[materials] no manifest (${r.status}); procedural materials only`);
     } catch (e) { console.info('[materials] manifest unavailable or invalid; procedural materials only'); }
-    if (!manifest || typeof manifest !== 'object' || !manifest.materials) return api.status();
+    if (!manifest || typeof manifest !== 'object' || !manifest.materials) { applyQuerySizes(); return api.status(); }
     const jobs = [];
     for (const kind of KINDS) {
       const entry = manifest.materials[kind] || manifest.materials[LEVEL0_DEFAULTS[kind].folder];
@@ -258,6 +290,7 @@ export function createLevel0Materials(THREE, opts) {
         if (typeof rel === 'string' && rel) jobs.push(loadChannel(kind, ch, rel, manifestUrl));
       }
     }
+    applyQuerySizes();
     await Promise.all(jobs);
     if (jobs.length) console.info('[materials] texture status', api.status());
     return api.status();

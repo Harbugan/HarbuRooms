@@ -1,6 +1,29 @@
-# THE NULL ROOMS — Level 0 material system (v0.2)
+# THE NULL ROOMS — Level 0 material system (v0.3)
 
-Status: **for creative review. Not merged.** Procedural placeholders only, no production art.
+Status: **initial integration of the approved Level 0 textures, for in-game evaluation.** The procedural set remains as fallback and as the `?materials=legacy` baseline.
+
+## v0.3: approved Level 0 textures
+
+| Slot | File (unmodified originals) | Scale (metres per repeat) |
+|---|---|---|
+| wall | `wallpaper/wall_texture1024x1024_lvl0.jpg` | `[1, 1]` |
+| floor | `carpet/carpet_texture1024x1024_lvl0.jpg` | `[1, 1]` |
+| ceiling | `ceiling/ceiling_texture1024x1024_lvl0.jpg` | `null` = exactly one ceiling tile (0.5 m) |
+
+* **Original colours.** An external base colour is shown as painted: the baked palette hue is dropped (only the baked *light level*
+  is kept, via a per-vertex `aLight` attribute) and the macro colour drift is off. Controlled by `externalPaletteInfluence` (default 0)
+  and `externalMacroColor` (default 0). If the file fails to load, the procedural fallback gets the palette again. The scene's own
+  warm hemisphere light and VHS grade still tint everything, as for all game surfaces.
+* **Square ceiling tiles.** The existing 3D T-bar grid is kept, but spaced equally both ways (`CEIL_TILE`, default 0.5 m, so the
+  1 x 0.5 m light fixtures still cover exactly two tiles). `?ceilTile=0.25|0.5|1` changes it. The texture repeats once per tile and
+  its edges land on the grid. The supplied ceiling image has no baked borders (edge pixels match the interior), so it is used whole.
+* **Relief.** With no external normal / roughness file, they are derived from the new base-colour image (`deriveMaps`, default on),
+  so relief matches the painted detail rather than the old procedural canvas. Status shows `derived`.
+* **Scale is configurable** three ways: `params.size` in `manifest.json`; the URL, e.g. `?wallSize=1.2&floorSize=1x1&ceilSize=0.5`
+  (wins over the manifest); or live, `NULLROOMS_MATERIALS.setParams('floor', { size: [1.5, 1.5] })`. If you change the ceiling size
+  away from the tile size, tile edges no longer line up with the grid.
+* Known: the carpet file is 1000 x 1000 (name says 1024) and the carpet / ceiling images are not strictly seamless at the repeat
+  edge (the grid hides it on the ceiling; watch the carpet). Originals were not touched.
 
 ## What changed, what did not
 
@@ -42,10 +65,13 @@ or live with `NULLROOMS_MATERIALS.setParams('floor', { normalScale: 0.8 })`.
 
 | Param | Default (wall / floor / ceil) | Meaning |
 |---|---|---|
-| `size` | `[2, 2.9]` / `[2, 2]` / `[2, 2]` | Metres covered by one repeat of an **external** texture. Wall V runs over the wall height (2.9 m). |
+| `size` | `null` / `[2, 2]` / `null` (manifest: `[1, 1]` / `[1, 1]` / tile) | Metres covered by one repeat of an **external** texture. Wall `null` = `[2, wall height]`, ceiling `null` = one tile. |
+| `externalPaletteInfluence` | 0 | `paletteInfluence` used once an external base colour is loaded |
+| `externalMacroColor` | 0 | `macroColor` used once an external base colour is loaded |
+| `deriveMaps` | true | Derive normal / roughness from an external base colour when none is supplied |
 | `normalScale` | 0.28 / 0.6 / 0.4 | Normal-map strength |
 | `roughness` | 1 | Multiplier on the roughness map (map holds absolute values) |
-| `paletteInfluence` | 1 | 1 = baked vertex colour tints the map exactly like legacy; 0 = vertex colour only dims it |
+| `paletteInfluence` | 1 | Procedural maps. 1 = baked palette tints the map like legacy; 0 = only the baked light level is applied |
 | `gain` | 0.985 | Diffuse multiplier (matches legacy brightness, see below) |
 | `specular` | 1 | Multiplier on specular highlights |
 | `macroColor` | 0.045 / 0.07 / 0.05 | Amplitude of large-scale colour drift |

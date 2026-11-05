@@ -1,18 +1,18 @@
 {
-  "version": 1,
-  "note": "Set a texture path (relative to this file) to replace that channel. null = built-in procedural fallback. Placeholders only: nothing here is final art.",
+  "version": 2,
+  "note": "Set a texture path (relative to this file) to replace that channel. null = built-in procedural fallback. params.size = metres covered by ONE repeat [width, height] (square textures: keep it square). ceiling size null = exactly one ceiling tile. Query overrides: ?wallSize=1.2 ?floorSize=1 ?ceilSize=0.5",
   "materials": {
     "wallpaper": {
-      "textures": { "baseColor": null, "normal": null, "roughness": null },
-      "params": { "size": [2, 2.9] }
+      "textures": { "baseColor": "wallpaper/wall_texture1024x1024_lvl0.jpg", "normal": null, "roughness": null },
+      "params": { "size": [1, 1] }
     },
     "carpet": {
-      "textures": { "baseColor": null, "normal": null, "roughness": null },
-      "params": { "size": [2, 2] }
+      "textures": { "baseColor": "carpet/carpet_texture1024x1024_lvl0.jpg", "normal": null, "roughness": null },
+      "params": { "size": [1, 1] }
     },
     "ceiling": {
-      "textures": { "baseColor": null, "normal": null, "roughness": null },
-      "params": { "size": [2, 2] }
+      "textures": { "baseColor": "ceiling/ceiling_texture1024x1024_lvl0.jpg", "normal": null, "roughness": null },
+      "params": { "size": null }
     }
   }
 }
