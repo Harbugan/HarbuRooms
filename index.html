@@ -254,8 +254,7 @@ function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const L=lay
     if(ax)slab(B,ox+line,oz+m,.3,l,DOOR_TOP,h,wall);else slab(B,ox+m,oz+line,l,.3,DOOR_TOP,h,wall)}
   for(const [x,z,s] of L.pillars){slab(B,ox+x,oz+z,s,s,0,Hc,wall);B.walls.push({x:ox+x,z:oz+z,w:s,d:s})}
   for(const l of L.lights)B.box(l.x,Hc-.012,l.z,.97,.02,.47,l.c,false,'glow');
-  // Suspended T-bar grid: thin strips hanging just below the tiles so the ceiling has real depth. Same spacing both ways = square tiles.
-  const gw=.028,gh=.018;for(let k=0,n=Math.round(N/CEIL_TILE);k<n;k++){B.box(ox+k*CEIL_TILE,Hc-gh/2,oz+8,gw,gh,16,p.grid,false,'grid');B.box(ox+8,Hc-gh/2,oz+k*CEIL_TILE,16,gh,gw,p.grid,false,'grid')}
+  // Level 0 ceiling grid is painted into the ceiling texture; no physical T-bar strips.
   const g=new THREE.Group();g.userData.walls=B.walls;for(const m of [B.mesh(B.b.wall,MATS.wall),B.mesh(B.b.floor,MATS.floor),B.mesh(B.b.ceil,MATS.ceil),B.mesh(B.b.glow,glowMat),B.mesh(B.b.grid,gridMat)])if(m){m.updateMatrix();g.add(m)}
   scene.add(g);chunks.set(id,g)}
 function removeChunk(id,g){scene.remove(g);g.traverse(o=>o.geometry&&o.geometry.dispose());chunks.delete(id)}
