@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "note": "Set a texture path (relative to this file) to replace that channel. null = built-in procedural fallback. params.size = metres covered by ONE repeat [width, height] (square textures: keep it square). ceiling size null = exactly one 0.5 x 1.0 m ceiling panel (portrait 1024 x 2048 px image despite its filename). Query overrides: ?wallSize=1.2 ?floorSize=1 ?ceilSize=0.5x1",
+  "materials": {
+    "wallpaper": {
+      "textures": { "baseColor": "wallpaper/wall_texture1024x1024_lvl0.jpg", "normal": null, "roughness": null },
+      "params": { "size": [1, 1] }
+    },
+    "carpet": {
+      "textures": { "baseColor": "carpet/carpet_texture1024x1024_lvl0.jpg", "normal": null, "roughness": null },
+      "params": { "size": [1, 1] }
+    },
+    "ceiling": {
+      "textures": { "baseColor": "ceiling/ceiling_texture2048x1024_lvl0.jpg", "normal": null, "roughness": null },
+      "params": { "size": null }
+    }
+  }
+}
