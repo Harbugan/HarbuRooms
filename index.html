@@ -75,10 +75,17 @@ function sizePost(){const pr=renderer.getPixelRatio();rt.setSize(Math.max(2,Math
 // hemisphere fill that stands in for bounce light. There is deliberately no camera-attached light (no flashlight look).
 // Hemisphere: sky colour lights up-facing surfaces (floor), ground colour lights DOWN-facing ones (the ceiling underside!),
 // so the ground colour must stay near-neutral or the ceiling turns yellow/grey. Baked levels below are tuned together with it.
-const LIGHT={sky:0xfff3df,ground:0xe4e0d4,hemi:1.9,
-  base:{wall:.76,floor:.7,ceil:.8}, // baked level far from any fixture (before hemisphere)
+// Baked level per vertex = base[kind] + gain * sum(panel pools), then passed through shoulder(): linear up to `knee`, then
+// easing towards `max`. (The old model hard-clamped at 1.2, and a lit 4 m panel grid overlaps so much that EVERY lit vertex
+// hit the clamp: lit areas were flat and a single dead or dim panel was barely visible.) knee>=max gives the old hard clamp.
+// ?lighting=legacy restores the previous constants exactly, as a comparison baseline (baked at chunk build: reload to switch).
+const LIGHT_SETS={
+  soft:  {base:{wall:.6,floor:.6,ceil:.6},gain:1.1,knee:1.05,max:1.25,dark:.5},
+  legacy:{base:{wall:.76,floor:.7,ceil:.8},gain:1,knee:1.2,max:1.2,dark:.42}};
+const LIGHT={sky:0xfff3df,ground:0xe4e0d4,hemi:2.25, // hemi = base intensity; frame() adds the flicker
   reach:8,soft:12,                  // pool radius in metres (must be <= chunk gather margin of 8) and falloff softness (m^2)
-  max:1.2};                         // clamp on the baked level
+  ...(LIGHT_SETS[new URLSearchParams(location.search).get('lighting')]||LIGHT_SETS.soft)};
+const shoulder=x=>x<LIGHT.knee?x:Math.min(LIGHT.max,LIGHT.knee+(LIGHT.max-LIGHT.knee)*(1-Math.exp(-(x-LIGHT.knee)/Math.max(1e-6,LIGHT.max-LIGHT.knee))));
 const ambient=new THREE.HemisphereLight(LIGHT.sky,LIGHT.ground,LIGHT.hemi);scene.add(ambient);scene.add(camera);
 // --- GEN START: pure, deterministic level layout (no Three.js) — every chunk can be rebuilt from its coordinates alone.
 const tile=16, N=16, range=4, chunks=new Map(), H=2.9, DOOR_TOP=2.25, CB=8; // 16 x 1 m cells per chunk, low oppressive ceiling
@@ -231,7 +238,7 @@ class Builder{
   box(x,y,z,w,h,d,color,collide=false,kind='wall',vs=1/H,vo=0){
     const b=this.b[kind],glow=kind==='glow',base=b.p.length/3;_c.set(color);
     for(let v=0;v<24;v++){const nx=BN[v*3],ny=BN[v*3+1],px=BP[v*3]*w+x,py=BP[v*3+1]*h+y,pz=BP[v*3+2]*d+z;b.p.push(px,py,pz);b.n.push(nx,ny,BN[v*3+2]);
-      let s=1;if(!glow){s=LIGHT.base[kind]??LIGHT.base.ceil;for(const L of this.lights){const dx=px-L.x,dy=py-L.y,dz=pz-L.z,q=dx*dx+dy*dy+dz*dz,w=1-q/(LIGHT.reach*LIGHT.reach);if(w>0)s+=L.k*w*w/(1+q/LIGHT.soft)}s=Math.min(s,LIGHT.max)*this.dim}
+      let s=1;if(!glow){s=LIGHT.base[kind]??LIGHT.base.ceil;for(const L of this.lights){const dx=px-L.x,dy=py-L.y,dz=pz-L.z,q=dx*dx+dy*dy+dz*dz,w=1-q/(LIGHT.reach*LIGHT.reach);if(w>0)s+=LIGHT.gain*L.k*w*w/(1+q/LIGHT.soft)}s=shoulder(s)*this.dim}
       b.c.push(_c.r*s,_c.g*s,_c.b*s);b.l.push(s); // l = light level alone (no palette hue), used by external textures
       if(kind==='wall'){const vv=py*vs+vo;if(Math.abs(nx)>.5)b.u.push(pz/2,vv);else if(Math.abs(ny)>.5)b.u.push(px/2,pz/2);else b.u.push(px/2,vv)}else b.u.push(px/2,pz/2)}
     for(let i=0;i<36;i++)b.i.push(BI[i]+base);
@@ -250,7 +257,7 @@ function wallRun(B,ax,line,a,b,h,v,color,ox,oz){const t=.3,s=a-t/2,e=b+t/2,n=Mat
 function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const L=layout(cx,cz),I=L.I,p=I.pal,ox=cx*N,oz=cz*N,Hc=I.Hc,wall=p.wall;
   // Baked light comes from this chunk's panels and any neighbouring panel close enough to reach in.
   const lights=[];for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++)for(const l of layout(cx+a,cz+b).lights)if(l.k>0&&l.x>ox-8&&l.x<ox+N+8&&l.z>oz-8&&l.z<oz+N+8)lights.push(l);
-  const B=new Builder(lights,I.sp==='dark'?.42:1);
+  const B=new Builder(lights,I.sp==='dark'?LIGHT.dark:1);
   for(let i=0;i<8;i++)for(let j=0;j<8;j++){B.box(ox+1+2*i,-.18,oz+1+2*j,2,.36,2,p.floor,false,'floor');B.box(ox+1+2*i,Hc+.18,oz+1+2*j,2,.36,2,p.ceil,false,'ceil')}
   // Walls on the lines this chunk owns: its north/west boundary (line 0) and every interior line. South/east belong to the neighbours.
   for(let ax=0;ax<2;ax++){const arr=ax?L.vw:L.hw;for(let line=0;line<N;line++){const h=line?Hc:L.E[ax].h;
@@ -357,6 +364,6 @@ function handheld(now,dt,moving,running){const t=now/1000;moveAmt+=((moving?1:0)
   camera.rotation.set(view.pitch+sx+Math.cos(elapsed*2)*.009*moveAmt+Math.sin(t*37)*.012*jolt,view.yaw+sy+Math.cos(elapsed)*.008*moveAmt,roll+Math.sin(t*29)*.02*jolt,'YXZ');
   const f=settings.fov+(settings.bob?Math.sin(t*.4)*.8+Math.sin(t*1.3)*.4-runAmt*3-jolt*1.5:0);if(Math.abs(camera.fov-f)>.01){camera.fov=f;camera.updateProjectionMatrix()}
   vhsMat.uniforms.shake.value=jolt+runAmt*.5}
-let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?4.6:2.5)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(keys.has('ShiftLeft')||keys.has('ShiftRight')?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(keys.has('ShiftLeft')||keys.has('ShiftRight'))}else camera.position.y+=(1.7-camera.position.y)*.12}updateChunks();ambient.intensity=2.25+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight'));handheld(now,dt,mv,mv&&(keys.has('ShiftLeft')||keys.has('ShiftRight')));breathe();
+let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?4.6:2.5)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(keys.has('ShiftLeft')||keys.has('ShiftRight')?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(keys.has('ShiftLeft')||keys.has('ShiftRight'))}else camera.position.y+=(1.7-camera.position.y)*.12}updateChunks();ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight'));handheld(now,dt,mv,mv&&(keys.has('ShiftLeft')||keys.has('ShiftRight')));breathe();
 vhsMat.uniforms.time.value=now/1000%1000;renderer.setRenderTarget(rt);renderer.render(scene,camera);renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();while(queue.length)updateChunks();{const [x,z]=findSpawn();camera.position.set(x,1.7,z)}requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
 </script></body></html>

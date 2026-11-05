@@ -19,7 +19,7 @@ Already implemented in the repository (subject to ongoing QA):
 
 | Priority | Milestone | Status | Definition of done |
 | --- | --- | --- | --- |
-| P1 | Level 0 lighting refinement | **NEXT** | Plausible diffuse fluorescent light; balanced bright/dim zones; preserved material colors; no obvious chunk seams or major performance regression. |
+| P1 | Level 0 lighting refinement | **IN REVIEW** (PR open, needs in-game visual check; see `docs/LIGHTING.md`) | Plausible diffuse fluorescent light; balanced bright/dim zones; preserved material colors; no obvious chunk seams or major performance regression. |
 | P2 | Room generation and proportions | Planned | More believable, coherent Kane Parsons-inspired office spaces; less visibly random layout; reliable navigation. |
 | P3 | Ambient audio landscape | Planned | Subtle spatial fluorescent hum and room ambience; controlled silence and variation; no intrusive breathing/footsteps. |
 | P4 | Environmental detail pass | Planned | Restrained stains, irregularities, odd openings and spatial cues without visual clutter. |
