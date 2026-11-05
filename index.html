@@ -180,7 +180,7 @@ function layout(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L)return 
   for(let i=0;i<4;i++)for(let j=0;j<4;j++){const lx=1+4*i,lz=1+4*j,g=lab[lz*N+lx],h=hash(cx*4+i,cz*4+j,620);
     if(!roomOff.has(g))roomOff.set(g,hash(cx*64+g,cz,610)<.07);
     let k=.5,c=0xfffaec;if(I.sp==='dark'?h<.9:(h<.07||roomOff.get(g))){k=0;c=0x76756a}else if(I.sp==='dark'||h<.16){k=.12;c=0xb4b2a2}
-    lights.push({x:cx*N+lx+.5,y:I.Hc-.05,z:cz*N+lz+.75,k,c})}
+    lights.push({x:cx*N+lx+.25,y:I.Hc-.05,z:cz*N+lz+.5,k,c})}
   L={I,E,hw,vw,lint,pillars,lights};layoutCache.set(id,L);return L}
 // --- GEN END
 // Shared materials: Lambert + vertex colours is far cheaper than Standard; "glow" panels ignore lighting.
@@ -260,7 +260,7 @@ function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const L=lay
   for(const [ax,line,a,b] of lint){const h=line?Hc:L.E[ax].h,m=(a+b)/2,l=b-a;
     if(ax)slab(B,ox+line,oz+m,.3,l,DOOR_TOP,h,wall);else slab(B,ox+m,oz+line,l,.3,DOOR_TOP,h,wall)}
   for(const [x,z,s] of L.pillars){slab(B,ox+x,oz+z,s,s,0,Hc,wall);B.walls.push({x:ox+x,z:oz+z,w:s,d:s})}
-  for(const l of L.lights)B.box(l.x,Hc-.012,l.z,.97,.02,.47,l.c,false,'glow');
+  for(const l of L.lights)B.box(l.x,Hc-.012,l.z,.47,.02,.97,l.c,false,'glow');
   // Thin, nearly flush grid strips on the panel seams (x lines every CEIL_W, z lines every CEIL_L). This chunk owns lines 0..N-step;
   // the line at N belongs to the next chunk. Split into 2 m pieces so the baked light pools have vertices to work with.
   {const gw=.024,gh=.004,gy=Hc-.0015,gc=_c.set(p.grid).multiplyScalar(.8).getHex();
@@ -303,33 +303,10 @@ try{const a=new (window.AudioContext||window.webkitAudioContext)(),sr=a.sampleRa
   const dip=t=>{bz.gain.cancelScheduledValues(t);bz.gain.setValueAtTime(.055,t);bz.gain.linearRampToValueAtTime(.014,t+.02);bz.gain.linearRampToValueAtTime(.068,t+.13);bz.gain.linearRampToValueAtTime(.055,t+.32)};
   const flicker=(v=1)=>{const t=a.currentTime+.01,n=3+Math.floor(Math.random()*6);dip(t);for(let i=0;i<n;i++)click(t+i*R(.015,.065),R(.05,.13)*v)};
   const tick=()=>{if(Math.random()<.16)flicker(.7);else click(a.currentTime+.02,R(.03,.08));setTimeout(tick,R(300,2900))};tick();
-  // skridt: blød, dæmpet tæppe-dump + hæl/tå, sendt kraftigt til ekko
-  const hit=(t,pan,v,fc,d)=>{const s=a.createBufferSource(),f=filt('lowpass',fc,.5),g=a.createGain();s.buffer=nbuf;g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(v,t+.012);g.gain.exponentialRampToValueAtTime(.0001,t+d);s.connect(f).connect(g).connect(pan);s.start(t,R(0,3),d+.1)};
-  const step=(run,k)=>{const t=a.currentTime+.005,v=run?1.3:1,pan=a.createStereoPanner(),dg=a.createGain(),sw=a.createGain();pan.pan.value=k?.3:-.3;dg.gain.value=.4;sw.gain.value=1.15;pan.connect(dg).connect(out);pan.connect(sw).connect(wet);
-    const o=a.createOscillator(),og=a.createGain();o.frequency.setValueAtTime(R(100,125),t);o.frequency.exponentialRampToValueAtTime(42,t+.14);og.gain.setValueAtTime(.0001,t);og.gain.exponentialRampToValueAtTime(.55*v,t+.008);og.gain.exponentialRampToValueAtTime(.0001,t+.17);o.connect(og).connect(pan);o.start(t);o.stop(t+.2);
-    hit(t,pan,.4*v,R(520,820)*(run?1.3:1),.14);hit(t+.1,pan,.14*v,R(900,1300),.07)};
-  // Subtle human breathing: soft, filtered air with asymmetric phrasing and real silence.
-  // Keep it mostly dry and barely audible; exertion raises presence gently, not dramatically.
-  const bd=a.createGain(),bw=a.createGain();bd.gain.value=.32;bw.gain.value=.025;bd.connect(out);bw.connect(wet);
-  const puff=(t,d,fc,pk)=>{const s=a.createBufferSource(),hp=filt('highpass',180,.5),lp=filt('lowpass',fc,.5),g=a.createGain();
-    s.buffer=nbuf;s.loop=true;
-    const attack=d*R(.28,.4),release=d*R(.32,.44),peak=t+attack,hold=Math.max(peak+.03,t+d-release);
-    g.gain.setValueAtTime(0,t);
-    g.gain.linearRampToValueAtTime(pk*.42,t+attack*.52);
-    g.gain.linearRampToValueAtTime(pk,peak);
-    g.gain.linearRampToValueAtTime(pk*.78,hold);
-    g.gain.linearRampToValueAtTime(0,t+d);
-    s.connect(hp).connect(lp).connect(g);g.connect(bd);g.connect(bw);
-    s.start(t,R(0,3));s.stop(t+d+.02)};
-  const breath=i=>{const effort=Math.min(1,Math.max(0,i)),j=R(.9,1.12),t=a.currentTime+.03;
-    const inh=(1.6-.55*effort)*j,between=R(.18,.43),exh=(2.05-.62*effort)*j;
-    const presence=.12+.13*effort;
-    puff(t,inh,R(650,850),presence*R(.75,.95));
-    puff(t+inh+between,exh,R(550,750),presence*R(.82,1.05));
-    AUD.next=t+inh+between+exh+R(.9,1.8)-effort*.55};
-  AUD={flicker,step,breath,next:0,ctx:a}}catch(e){console.warn('Audio unavailable',e)}}
-function footfalls(run){if(!AUD)return;const n=Math.floor((elapsed+Math.PI/2)/(2*Math.PI));if(stepN===null){stepN=n;return}if(n!==stepN){stepN=n;AUD.step(run,n&1)}}
-function breathe(){if(AUD&&playing&&AUD.ctx.currentTime>=AUD.next)AUD.breath(Math.min(1,moveAmt*.35+runAmt*.9))}
+  // fodtrin og vejrtrækning er fjernet midlertidigt; kun lampernes summen/klik/flimmer er tilbage
+  AUD={flicker,ctx:a}}catch(e){console.warn('Audio unavailable',e)}}
+function footfalls(run){}
+function breathe(){}
 function flick(){const d=Math.random()<.015;if(d&&AUD)AUD.flicker();return d}
 const DEFAULT_SETTINGS={quality:'high',vhs:75,fov:78,sensitivity:50,bob:true,volume:70};
 let saved={};try{saved=JSON.parse(localStorage.getItem('nullrooms.settings')||'{}')||{}}catch(e){}
