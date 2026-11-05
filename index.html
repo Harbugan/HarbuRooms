@@ -71,8 +71,9 @@ void main(){
 const postScene=new THREE.Scene(),postCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),vhsMat));
 function sizePost(){const pr=renderer.getPixelRatio();rt.setSize(Math.max(2,Math.round(innerWidth*pr*RES)),Math.max(2,Math.round(innerHeight*pr*RES)));vhsMat.uniforms.res.value.set(innerWidth*pr,innerHeight*pr)}sizePost();
 // Lighting is baked into vertex colours (see Builder), so only cheap global lights are needed. No per-chunk PointLights.
-const ambient=new THREE.HemisphereLight(0xfff8d8,0xd8c490,2.3);scene.add(ambient);
-scene.add(camera);const torch=new THREE.PointLight(0xfff0c0,2.2,12,2);torch.position.set(0,.3,0);camera.add(torch);
+// Neutral, restrained fill: the baked ceiling-panel pools provide the main room illumination.
+const ambient=new THREE.HemisphereLight(0xf4f3e9,0x9b9687,1.45);scene.add(ambient);
+scene.add(camera);const torch=new THREE.PointLight(0xfff4e4,0.65,8,2);torch.position.set(0,.3,0);camera.add(torch);
 // --- GEN START: pure, deterministic level layout (no Three.js) — every chunk can be rebuilt from its coordinates alone.
 const tile=16, N=16, range=4, chunks=new Map(), H=2.9, DOOR_TOP=2.25, CB=8; // 16 x 1 m cells per chunk, low oppressive ceiling
 // Ceiling tiles are SQUARES of CEIL_TILE metres (T-bar grid spacing, both directions). 0.5 keeps the 1 x 0.5 m light fixtures exactly 2 tiles.
@@ -172,7 +173,7 @@ function layout(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L)return 
   const lights=[],roomOff=new Map();
   for(let i=0;i<4;i++)for(let j=0;j<4;j++){const lx=1+4*i,lz=1+4*j,g=lab[lz*N+lx],h=hash(cx*4+i,cz*4+j,620);
     if(!roomOff.has(g))roomOff.set(g,hash(cx*64+g,cz,610)<.07);
-    let k=.36,c=I.pal.light;if(I.sp==='dark'?h<.9:(h<.07||roomOff.get(g))){k=0;c=0x6d6852}else if(I.sp==='dark'||h<.16){k=.1;c=0xb8b49a}
+    let k=.55,c=0xf3f2e6;if(I.sp==='dark'?h<.9:(h<.07||roomOff.get(g))){k=0;c=0x37372f}else if(I.sp==='dark'||h<.16){k=.12;c=0x88887a}
     lights.push({x:cx*N+lx+.5,y:I.Hc-.05,z:cz*N+lz+.75,k,c})}
   L={I,E,hw,vw,lint,pillars,lights};layoutCache.set(id,L);return L}
 // --- GEN END
@@ -224,7 +225,7 @@ class Builder{
   box(x,y,z,w,h,d,color,collide=false,kind='wall',vs=1/H,vo=0){
     const b=this.b[kind],glow=kind==='glow',base=b.p.length/3;_c.set(color);
     for(let v=0;v<24;v++){const nx=BN[v*3],ny=BN[v*3+1],px=BP[v*3]*w+x,py=BP[v*3+1]*h+y,pz=BP[v*3+2]*d+z;b.p.push(px,py,pz);b.n.push(nx,ny,BN[v*3+2]);
-      let s=1;if(!glow){s=kind==='ceil'?.9:kind==='grid'?.8:.78;for(const L of this.lights){const dx=px-L.x,dy=py-L.y,dz=pz-L.z,q=dx*dx+dy*dy+dz*dz;if(q<70)s+=L.k/(1+q/9)}s=Math.min(s,1.3)*this.dim}
+      let s=1;if(!glow){s=kind==='ceil'?.65:kind==='grid'?.65:.48;for(const L of this.lights){const dx=px-L.x,dy=py-L.y,dz=pz-L.z,q=dx*dx+dy*dy+dz*dz;if(q<70)s+=L.k/(1+q/6)}s=Math.min(s,1.22)*this.dim}
       b.c.push(_c.r*s,_c.g*s,_c.b*s);b.l.push(s); // l = light level alone (no palette hue), used by external textures
       if(kind==='wall'){const vv=py*vs+vo;if(Math.abs(nx)>.5)b.u.push(pz/2,vv);else if(Math.abs(ny)>.5)b.u.push(px/2,pz/2);else b.u.push(px/2,vv)}else b.u.push(px/2,pz/2)}
     for(let i=0;i<36;i++)b.i.push(BI[i]+base);
