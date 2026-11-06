@@ -14,14 +14,14 @@ try {
   document.querySelector('#error').textContent = '3D engine could not load. Check your connection or browser console.';
   throw error;
 }
-const scene=new THREE.Scene();const HAZE=0xb3a462;scene.background=new THREE.Color(HAZE);scene.fog=new THREE.FogExp2(HAZE,.027);
+const scene=new THREE.Scene();const HAZE=0xb3a462,FOG_BASE=new THREE.Color(HAZE);scene.background=new THREE.Color(HAZE);scene.fog=new THREE.FogExp2(HAZE,.027);
 const camera=new THREE.PerspectiveCamera(78,innerWidth/innerHeight,.05,110);camera.rotation.order='YXZ';
 const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
 // --- VHS post pass: scene renders into a half-float target, then a full-screen shader smears, wobbles, tints and vignettes it.
 let RES=.85;const rt=new THREE.WebGLRenderTarget(2,2,{type:THREE.HalfFloatType,samples:4,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
-const vhsMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tDiffuse:{value:rt.texture},time:{value:0},res:{value:new THREE.Vector2(1,1)},shake:{value:0},intensity:{value:.75},uReal:{value:0},uPost:{value:1},uGrain:{value:1},uVig:{value:1},uScan:{value:1},uHalo:{value:1},uCA:{value:1},tBloom0:{value:null},tBloom1:{value:null},tBloom2:{value:null},uBloomOn:{value:0},uBloomW:{value:new THREE.Vector3()}},
+const vhsMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tDiffuse:{value:rt.texture},time:{value:0},res:{value:new THREE.Vector2(1,1)},shake:{value:0},intensity:{value:.75},uReal:{value:0},uPost:{value:1},uGrain:{value:1},uVig:{value:1},uScan:{value:1},uHalo:{value:1},uCA:{value:1},uExp:{value:1},uTone:{value:1},uGrade:{value:new THREE.Vector4(.78,.92,1,1)},uBlue:{value:1},tBloom0:{value:null},tBloom1:{value:null},tBloom2:{value:null},uBloomOn:{value:0},uBloomW:{value:new THREE.Vector3()}},
 vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
-fragmentShader:`precision highp float;uniform sampler2D tDiffuse;uniform float time,shake,intensity,uReal,uPost,uGrain,uVig,uScan,uHalo,uCA,uBloomOn;uniform sampler2D tBloom0,tBloom1,tBloom2;uniform vec3 uBloomW;uniform vec2 res;varying vec2 vUv;
+fragmentShader:`precision highp float;uniform sampler2D tDiffuse;uniform float time,shake,intensity,uReal,uPost,uGrain,uVig,uScan,uHalo,uCA,uBloomOn,uExp,uTone,uBlue;uniform vec4 uGrade;uniform sampler2D tBloom0,tBloom1,tBloom2;uniform vec3 uBloomW;uniform vec2 res;varying vec2 vUv;
 float h11(float x){return fract(sin(x*127.1)*43758.5453);}
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float n1(float x){float i=floor(x),f=fract(x);f=f*f*(3.-2.*f);return mix(h11(i),h11(i+1.),f);}
@@ -31,6 +31,8 @@ float n1(float x){float i=floor(x),f=fract(x);f=f*f*(3.-2.*f);return mix(h11(i),
 vec3 srgbOetf(vec3 c){c=clamp(c,0.,1.);return mix(c*12.92,1.055*pow(c,vec3(1./2.4))-.055,step(.0031308,c));}
 vec3 enc(vec3 c){return uReal>.5?srgbOetf(c):pow(max(c,0.),vec3(1./2.2));}
 // REALISTIC only: lamps are HDR (>1) in tDiffuse. The existing smear/halation taps see them clamped to 1 (as before 4C.2); the new bloom pass carries the excess.
+// soft highlight shoulder (REALISTIC, uTone<1): linear up to k, eases towards 1
+vec3 toneK(vec3 c,float k){return min(c,vec3(k))+(1.-k)*(1.-exp(-max(c-k,0.)/max(1.-k,1e-3)));}
 vec4 T(vec2 p){vec4 c=texture2D(tDiffuse,p);return uReal>.5?min(c,vec4(1.)):c;}
 void main(){
   // post disabled: neutral, correctly encoded passthrough (skips every tap below)
@@ -60,11 +62,13 @@ void main(){
   // fluorescent bloom (REALISTIC, linear light, added before encoding): 3 blurred levels from bloomPass()
   if(uBloomOn>.5&&uReal>.5)bl=texture2D(tBloom0,uv).rgb*uBloomW.x+texture2D(tBloom1,uv).rgb*uBloomW.y+texture2D(tBloom2,uv).rgb*uBloomW.z;
   col+=bl;
+  col*=uExp;if(uTone<.999)col=toneK(col,uTone);
   col=enc(col);
   // washed-out tape colour: desaturate, lift blacks, warm/magenta cast, soft highlight bloom
   float l=dot(col,vec3(.299,.587,.114));
-  col=mix(vec3(l),col,.78);
-  col=col*vec3(1.04,1.0,.9)*.92+vec3(.035,.03,.04);
+  col=mix(vec3(l),col,uGrade.x);
+  col=col*vec3(1.04,1.0,.9*uBlue)*uGrade.y+vec3(.035,.03,.04)*uGrade.z;
+  if(abs(uGrade.w-1.)>.001)col=(col-.4)*uGrade.w+.4; // contrast about an encoded mid-grey (REALISTIC only; ORIGINAL = 1)
   col+=max(l-.72,0.)*vec3(.35,.3,.18);
   // scanlines
   col*=1.-.2*uScan*(.5+.5*sin(vUv.y*330.*6.2832));
@@ -456,7 +460,8 @@ function drawMap(now){if(now-mapAt<250)return;mapAt=now;
 let hum,AUD=null,stepN=null,masterGain=null;
 let introDuck=1,lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
 const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100,introEnabled:1,introDuration:8,introFall:1,introShake:.35,introBreath:.25,introImpact:.5,introDuck:.6,envEnabled:1,envWear:8,envDamp:3,envCeil:2,envIntensity:25,envShow:0,
-  visProfile:0,visPost:1,bloomOn:1,lampGain:4,lampFog:30,bloomThr:1,bloomInt:25,bloomSpread:50}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
+  visProfile:0,visPost:1,bloomOn:1,lampGain:4,lampFog:36,bloomThr:1,bloomInt:28,bloomSpread:96,
+  fogBright:65,fogDens:100,exposure:100,toneKnee:100,grSat:90,grBlue:90,grLift:50,grGain:92,grCon:110}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
 let devSaved={};try{devSaved=JSON.parse(localStorage.getItem('nullrooms.dev')||'{}')||{}}catch(e){}
 // VISUAL / RENDERING: one gain set per profile, so tuning Realistic never touches Original. Defaults are 100 % = the look the post shader always had.
 const VIS_FX=[['grain','Grain intensity','uGrain'],['vig','Vignette intensity','uVig'],['scan','Scanline intensity','uScan'],['halo','Halation intensity','uHalo'],['ca','Chromatic aberration','uCA']];
@@ -466,8 +471,13 @@ function devScale(k){return Math.max(0,Math.min(200,Number(devValues[k])||0))/10
 // Live apply: only uniform writes (no shader recompilation, no render-target change, no world rebuild).
 function visPrefix(){return devValues.visProfile===1?'visR_':'visO_'}
 function applyVisual(){const u=vhsMat.uniforms,pre=visPrefix();u.uReal.value=devValues.visProfile===1?1:0;u.uPost.value=devValues.visPost?1:0;
-  {const R=devValues.visProfile===1,bv=(k,d)=>{const v=Number(devValues[k]);return Number.isFinite(v)?v:d},sp=bv('bloomSpread',50)/100,I=bv('bloomInt',25)/100;
-   GLOW_U.value.set(R?bv('lampGain',4):1,R?bv('lampFog',30)/100:1);brightMat.uniforms.uThr.value=bv('bloomThr',1);u.uBloomW.value.set(I*(.2+.6*(1-sp)),I*.5,I*(.2+.6*sp))}
+  {const R=devValues.visProfile===1,bv=(k,d)=>{const v=Number(devValues[k]);return Number.isFinite(v)?v:d},sp=bv('bloomSpread',96)/100,I=bv('bloomInt',28)/100;
+   GLOW_U.value.set(R?bv('lampGain',4):1,R?bv('lampFog',36)/100:1);brightMat.uniforms.uThr.value=bv('bloomThr',1);u.uBloomW.value.set(I*(.2+.6*(1-sp)),I*.5,I*(.2+.6*sp));
+   // 4C.2 phase 2 (REALISTIC only): fog colour/density, exposure, shoulder, grade. ORIGINAL gets the historical constants back.
+   if(R){u.uExp.value=bv('exposure',100)/100;u.uTone.value=bv('toneKnee',100)/100;u.uGrade.value.set(bv('grSat',90)/100,bv('grGain',92)/100,bv('grLift',50)/100,bv('grCon',110)/100);u.uBlue.value=bv('grBlue',90)/100;
+     scene.fog.density=.027*bv('fogDens',100)/100;scene.fog.color.copy(FOG_BASE).multiplyScalar(bv('fogBright',65)/100)}
+   else{u.uExp.value=1;u.uTone.value=1;u.uGrade.value.set(.78,.92,1,1);u.uBlue.value=1;scene.fog.density=.027;scene.fog.color.copy(FOG_BASE)}
+   scene.background.copy(scene.fog.color)}
   for(const [k,,uni] of VIS_FX){const v=Number(devValues[pre+k]);u[uni].value=(Number.isFinite(v)?Math.max(0,Math.min(200,v)):100)/100}}
 applyVisual();
 function applyDevGains(){if(!devGains)return;for(const k of ['hum','footsteps','breathing','cough'])devGains[k].gain.value=devScale(k)*(k==='hum'?introDuck:1);devGains.reverb.gain.value=.09*devScale('reverb')}
@@ -865,6 +875,15 @@ const BLOOM_CFG=[['lampGain','Lamp HDR gain (x white)',1,12,.25,2,'x'],['lampFog
   const sync=()=>{input.value=bv(key);out.textContent=bv(key).toFixed(dec)+suffix};devSync.push(sync);sync();
   input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};row.append(cap,input,out);devControls.append(row)}
  const rb=document.createElement('button');rb.textContent='RESET BLOOM / LAMPS';rb.onclick=()=>{for(const [k] of BLOOM_CFG)devValues[k]=DEV_DEFAULT[k];devValues.bloomOn=1;save();devSync.forEach(fn=>fn())};devControls.append(rb)}
+// FOG, EXPOSURE & GRADE (4C.2 phase 2): REALISTIC profile only (ORIGINAL always uses the historical constants). All live uniform writes.
+const GRADE_CFG=[['fogBright','Fog colour brightness (lower = distance goes darker)',0,150,1,0,'%'],['fogDens','Fog density',0,200,1,0,'%'],['exposure','Exposure (linear, before grade)',50,150,1,0,'%'],['toneKnee','Highlight shoulder knee (100 = off)',50,100,1,0,'%'],['grSat','Saturation (Original look = 78)',0,150,1,0,'%'],['grBlue','Yellow bias: blue gain (Original = 100)',50,110,1,0,'%'],['grLift','Black lift (Original = 100)',0,200,1,0,'%'],['grGain','Grade gain (Original = 92)',70,120,1,0,'%'],['grCon','Contrast (100 = none)',80,150,1,0,'%']];
+{const h=document.createElement('h3');h.textContent='FOG, EXPOSURE & GRADE (REALISTIC ONLY)';devControls.append(h);
+ const save=()=>{applyVisual();visSave()},gv=k=>{const v=Number(devValues[k]);return Number.isFinite(v)?v:DEV_DEFAULT[k]};
+ for(const [key,label,min,max,step,dec,suffix] of GRADE_CFG){const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output');
+  cap.textContent=label;input.type='range';input.min=min;input.max=max;input.step=step;
+  const sync=()=>{input.value=gv(key);out.textContent=gv(key).toFixed(dec)+suffix};devSync.push(sync);sync();
+  input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};row.append(cap,input,out);devControls.append(row)}
+ const rb=document.createElement('button');rb.textContent='RESET FOG / GRADE';rb.onclick=()=>{for(const [k] of GRADE_CFG)devValues[k]=DEV_DEFAULT[k];save();devSync.forEach(fn=>fn())};devControls.append(rb)}
 addEventListener('keydown',e=>{if(e.code==='F4'){e.preventDefault();setVisProfile(devValues.visProfile?0:1)}});
 const devPadInvert=document.querySelector('#devPadInvert');devSync.push(()=>{devPadInvert.checked=!!settings.padInvertY});devPadInvert.onchange=()=>{settings.padInvertY=devPadInvert.checked;applySettings();document.getElementById('padInvertY').checked=settings.padInvertY};
 function devRefresh(){devSync.forEach(fn=>fn());document.querySelector('#devStatus').textContent='Audio: '+(AUD?.ctx.state||'not started')+' | '+['footsteps','breathing_idle','cough'].map(k=>k+': '+(audioBuffers[k]?.length?'file':'fallback')).join(' / ')}
