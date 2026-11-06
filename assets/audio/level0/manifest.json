@@ -11,7 +11,7 @@
     },
     "breathing_idle": {
       "files": [
-        "breathing_idle.ogg"
+        "player/breathing_idle.ogg"
       ],
       "gain": 1
     },
