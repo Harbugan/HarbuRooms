@@ -40,3 +40,6 @@ Do not implement controller support, VR or multiplayer as part of routine Level 
 
 ## Communication
 Use Danish for task discussions and handovers unless asked otherwise. Keep responses concise, concrete and technically precise. Ask before making a major architectural or artistic change that is outside the current task.
+
+## Developer tuning rule
+When adding a new adjustable audio or visual parameter, register it in the F3 debug console (`devRegistry` and relevant live apply function in `index.html`). Keep normal settings and debug controls synchronized. Debug tuning must not alter game behavior until the user changes a value. Verify audio test buttons and pointer-lock resume after changes.
