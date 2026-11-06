@@ -1,6 +1,6 @@
 # THE NULL ROOMS — Rendering profiles (4C.1)
 
-Status: **in review.** Foundation only: no exposure, tone mapping, AO or optical effects yet (planned 4C.2 / 4C.3).
+Status: **4C.1 and 4C.2 merged, real-GPU visual acceptance pending.** 4C.3 (AO and subtle optics, below) is in review. The sections below keep their original wording, including the "in review" notes from when each phase was written.
 
 ## Pipeline (unchanged)
 Scene -> half-float MSAA render target (linear light) -> one full-screen shader (`vhsMat`, `index.html`) -> canvas.
@@ -48,3 +48,29 @@ Status: **in review**, verified headless only (no shader errors; ORIGINAL mean c
 * **Exposure** (`uExp`, linear, before grade) and a **highlight shoulder** (`uTone`, soft knee towards 1; 100 % = off) are new and default neutral.
 * **REALISTIC defaults (hypotheses):** saturation 90 %, blue gain 90 %, black lift 50 %, gain 92 % (= old), contrast 110 %, exposure 100 %, shoulder off.
 * **F3 → FOG, EXPOSURE & GRADE (REALISTIC ONLY):** nine sliders plus reset. All live, saved in `nullrooms.dev`, restored by the global F3 reset.
+
+## 4C.3 — contact ambient occlusion + subtle optics (REALISTIC profile only)
+Status: **in review.** Verified headless (software GL): no shader/console errors, ORIGINAL pixel-identical to `main` (0 differing pixels outside the HUD text, fixed time and camera), AO visibly adds depth at wall/floor/ceiling contacts and pillars. **Not verified:** real-GPU look, FPS / frame pacing on Apple Silicon (compare with the F3 FPS counter, AO on vs off).
+
+### AO choice
+SSAO/GTAO was rejected: the scene target has no depth texture (4x MSAA half-float), so it would need a depth/normal pre-pass or MSAA depth resolve plus AO, blur and upsample passes, and it halos/shimmers against grain and VHS. Baked vertex AO is too coarse (2 m floor/ceiling tiles, 4 vertices). Chosen: **analytic contact AO in the shared Level 0 materials** (`GLSL_AO`, `src/materials/level0.js`), no extra pass, no new meshes, materials or draw calls.
+
+* **Occupancy map** (`occTex`, `index.html`): world-space toroidal 1024x1024 RG8 texture, 0.25 m per texel (256 m period > ~176 m of loaded chunks). R = walls reaching the floor, G = walls/lintels reaching the ceiling (area coverage). Built from each chunk's collision rects (+ lintels for G only), so it is deterministic and seamless across chunk borders. Blocks are re-rasterised in `frame()` (max 12 per frame) and uploaded with `copyTextureToTexture`; neighbours are re-rasterised so wall thickness spilling over a chunk border is included.
+* **Floor/ceiling:** 9 taps of the map around the fragment (radius = AO radius) -> soft gradient away from walls, pillars, doorway lintels.
+* **Walls:** height above floor and below ceiling (`aHc` vertex attribute = chunk ceiling height, so 6.6 m atrium rooms work) plus 6 map taps beside the fragment for inside corners.
+* AO multiplies albedo before fog and bloom (lamps, bloom and fog are not darkened). The legacy Lambert materials (`?materials=legacy`, F8) have no AO, by design.
+* ORIGINAL / AO off: `uAO.x = 0`, so the shader branch is skipped; F4 only writes uniforms (no rebuild, no recompile).
+
+### Optics (existing `vhsMat`, no new pass)
+* **Lens distortion:** gentle barrel warp of the post UV (corners fixed, centre magnified slightly). Uniform `uLens` = 0 in ORIGINAL.
+* **Radial chromatic aberration:** red/blue shifted along the radius (zero at centre) on top of the existing horizontal tape CA (`uCAr`).
+* **Grain:** `uGrainL` weights the existing grain by luminance (stronger in shadows, like sensor noise).
+* Vignette, scanlines, halation and VHS effects are unchanged (not duplicated); temporal variation was left out (a 24 Hz flicker and dropouts already exist).
+
+### Controls (F3 -> AMBIENT OCCLUSION & OPTICS (REALISTIC ONLY))
+AO enabled, AO intensity (default 55 %), AO radius (default 60 cm), lens distortion (30 %), lens CA (40 %), grain shadow weighting (60 %), RESET AO / OPTICS. All live, saved in `nullrooms.dev`, restored by the global F3 reset. Defaults are hypotheses: tune in a real browser.
+
+### Known limitations
+* Occupancy resolution is 0.25 m; very thin features (door jambs) get only coarse AO. Walls taller than the chunk ceiling (edge walls) use the chunk ceiling height for ceiling contact.
+* Cost: ~9 texture taps per floor/ceiling fragment and 6 per wall fragment while AO is on, plus a small texture upload when chunks stream. Not measured on a real GPU.
+* Headless test harness lives outside the repo (local three.js, fixed time via stubbed `requestAnimationFrame`/`performance.now`).
