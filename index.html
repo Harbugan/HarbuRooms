@@ -418,6 +418,7 @@ function drawMap(now){if(now-mapAt<250)return;mapAt=now;
   g.strokeStyle='#d00';g.lineWidth=2;g.beginPath();g.moveTo(px,pz);g.lineTo(px-Math.sin(yaw)*14,pz-Math.cos(yaw)*14);g.stroke()}
 /* ---- AUDIO: lysstofrør-brummen, drømmende ekko-skridt, vejrtrækning ---- */
 let hum,AUD=null,stepN=null,masterGain=null;
+let lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
 function startHum(){if(hum){if(hum.state==='suspended')hum.resume();return}
 try{const a=new (window.AudioContext||window.webkitAudioContext)(),sr=a.sampleRate;hum=a;
   const out=a.createGain();out.gain.value=.9;masterGain=a.createGain();masterGain.gain.value=settings.volume/100;const cmp=a.createDynamicsCompressor();cmp.threshold.value=-16;cmp.knee.value=18;cmp.ratio.value=4;out.connect(cmp).connect(masterGain).connect(a.destination);
@@ -439,10 +440,49 @@ try{const a=new (window.AudioContext||window.webkitAudioContext)(),sr=a.sampleRa
   const dip=t=>{bz.gain.cancelScheduledValues(t);bz.gain.setValueAtTime(.055,t);bz.gain.linearRampToValueAtTime(.014,t+.02);bz.gain.linearRampToValueAtTime(.068,t+.13);bz.gain.linearRampToValueAtTime(.055,t+.32)};
   const flicker=(v=1)=>{const t=a.currentTime+.01,n=3+Math.floor(Math.random()*6);dip(t);for(let i=0;i<n;i++)click(t+i*R(.015,.065),R(.05,.13)*v)};
   const tick=()=>{if(Math.random()<.16)flicker(.7);else click(a.currentTime+.02,R(.03,.08));setTimeout(tick,R(300,2900))};tick();
-  // fodtrin og vejrtrækning er fjernet midlertidigt; kun lampernes summen/klik/flimmer er tilbage
-  AUD={flicker,ctx:a}}catch(e){console.warn('Audio unavailable',e)}}
-function footfalls(run){}
-function breathe(){}
+  // Player foley: short, carpet-damped noises with very little early reflection.
+  const foley=a.createGain();foley.gain.value=.8;foley.connect(out);
+  const room=a.createConvolver(),roomWet=a.createGain(),irLen=Math.floor(sr*.19);
+  const roomIR=a.createBuffer(2,irLen,sr);
+  for(let c=0;c<2;c++){const d=roomIR.getChannelData(c);let lp=0;for(let i=0;i<irLen;i++){lp+=(Math.random()*2-1-lp)*.14;d[i]=lp*Math.exp(-i/sr*33)*.24}}
+  room.buffer=roomIR;roomWet.gain.value=.09;foley.connect(room).connect(roomWet).connect(out);
+  const voice=a.createGain(),voiceLP=filt('lowpass',950);voice.gain.value=.55;voiceLP.connect(voice).connect(foley);
+  const puff=(t,duration,level,low,high,target=foley)=>{
+    const src=a.createBufferSource(),bp=filt('bandpass',Math.sqrt(low*high),.45),lp=filt('lowpass',high),env=a.createGain();
+    src.buffer=nbuf;env.gain.setValueAtTime(.00001,t);env.gain.linearRampToValueAtTime(level,t+Math.min(.035,duration*.2));
+    env.gain.exponentialRampToValueAtTime(.00001,t+duration);
+    src.connect(bp).connect(lp).connect(env).connect(target);src.start(t,R(0,3),duration+.01);
+  };
+  AUD={flicker,ctx:a,foley,voiceLP,puff};
+  nextBreath=a.currentTime+1.5;nextCough=a.currentTime+R(35,85);
+}catch(e){console.warn('Audio unavailable',e)}}
+function footfalls(run){
+  if(!AUD||!playing||AUD.ctx.state!=='running')return;
+  const t=AUD.ctx.currentTime,interval=run?.30:.46;
+  if(t-lastFootstep<interval)return;
+  lastFootstep=t;
+  const v=(run?.034:.024)*(.83+Math.random()*.34);
+  AUD.puff(t,.11+Math.random()*.055,v,85,580);
+  // A second soft compression of the carpet, not a hard heel click.
+  AUD.puff(t+.055,.09,v*.3,100,400);
+}
+function breathe(){
+  if(!AUD||!playing||AUD.ctx.state!=='running')return;
+  const t=AUD.ctx.currentTime;
+  if(t>=nextBreath){
+    const running=runAmt>.5;
+    const duration=running?1.05:1.45;
+    AUD.puff(t,duration,running?.008:.0048,160,1250,AUD.voiceLP);
+    nextBreath=t+(running?2.25:3.8)+Math.random()*.55;
+  }
+  if(t>=nextCough){
+    // Rare, soft double burst; the camera receives a matching short impulse.
+    AUD.puff(t,.17,.035,180,1800,AUD.voiceLP);
+    AUD.puff(t+.19,.21,.025,150,1500,AUD.voiceLP);
+    coughPulse=1;
+    nextCough=t+65+Math.random()*145;
+  }
+}
 function flick(){const d=Math.random()<.015;if(d&&AUD)AUD.flicker();return d}
 const DEFAULT_SETTINGS={quality:'high',vhs:75,fov:78,sensitivity:50,bob:true,volume:70};
 let saved={};try{saved=JSON.parse(localStorage.getItem('nullrooms.settings')||'{}')||{}}catch(e){}
@@ -470,8 +510,8 @@ settingsBtn.onclick=()=>{showSettings=true;showMenu()};
 document.querySelector('#backBtn').onclick=()=>{showSettings=false;showMenu()};
 fullscreenBtn.onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch(e){document.querySelector('#error').textContent='Fullscreen unavailable: '+e.message}};
 document.addEventListener('fullscreenchange',()=>{fullscreenBtn.textContent=document.fullscreenElement?'WINDOWED':'FULLSCREEN'});
-exitBtn.onclick=()=>{hasStarted=false;showSettings=false;keys.clear();look.yaw=view.yaw=0;look.pitch=view.pitch=0;const p=findSpawn();camera.position.set(p[0],1.7,p[1]);showMenu()};
-start.onclick=async()=>{showSettings=false;startHum();try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock()}catch(error){document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}};
+exitBtn.onclick=()=>{if(masterGain&&hum)masterGain.gain.setTargetAtTime(0,hum.currentTime,.08);hasStarted=false;showSettings=false;keys.clear();look.yaw=view.yaw=0;look.pitch=view.pitch=0;const p=findSpawn();camera.position.set(p[0],1.7,p[1]);showMenu()};
+start.onclick=async()=>{showSettings=false;startHum();if(masterGain&&hum)masterGain.gain.setTargetAtTime(settings.volume/100,hum.currentTime,.08);try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock()}catch(error){document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}};
 document.addEventListener('pointerlockchange',()=>{playing=document.pointerLockElement===renderer.domElement;if(playing){hasStarted=true;overlay.style.display='none'}else{keys.clear();showMenu()}});
 document.addEventListener('mousemove',e=>{if(!playing)return;const factor=.002*settings.sensitivity/50;look.yaw-=e.movementX*factor;look.pitch=Math.max(-1.48,Math.min(1.48,look.pitch-e.movementY*factor))});
 const keys=new Set();addEventListener('keydown',e=>{if(!playing)return;keys.add(e.code);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));addEventListener('keydown',e=>{if(e.code==='F8'&&matSystem){e.preventDefault();matSystem.toggle(scene);console.info('[materials] mode:',matSystem.mode)}});addEventListener('blur',()=>keys.clear());camera.position.set(8,1.7,4);showMenu();
@@ -484,15 +524,16 @@ function updateClock(now){const sec=Math.floor((now-t0)/1000);if(sec===lastClock
 let moveAmt=0,runAmt=0,jolt=0;
 function handheld(now,dt,moving,running){const t=now/1000;moveAmt+=((moving?1:0)-moveAmt)*(1-Math.exp(-dt*5));runAmt+=((moving&&running?1:0)-runAmt)*(1-Math.exp(-dt*5));
   if(Math.random()<dt*.18)jolt=.5+Math.random()*.7;jolt*=Math.exp(-dt*5);
+  coughPulse*=Math.exp(-dt*13);
   const a=settings.bob?1+moveAmt*1.2+runAmt*1.6:0; // idle breathing -> walking -> running
   // camera lags the mouse a little, like a heavy camcorder on a shoulder
   const k=1-Math.exp(-dt*16);view.yaw+=(look.yaw-view.yaw)*k;view.pitch+=(look.pitch-view.pitch)*k;
   const sx=(Math.sin(t*1.1)*.6+Math.sin(t*2.3+1.7)*.3+Math.sin(t*5.1)*.1)*.004*a,
         sy=(Math.sin(t*.9+.5)*.6+Math.sin(t*1.9+3.1)*.3+Math.sin(t*4.3)*.1)*.005*a,
         roll=Math.sin(t*.7)*.006+Math.sin(t*1.7+2.)*.003+Math.sin(elapsed*.5)*.014*moveAmt+Math.sin(elapsed*.5)*.012*runAmt;
-  camera.rotation.set(view.pitch+sx+Math.cos(elapsed*2)*.009*moveAmt+Math.sin(t*37)*.012*jolt,view.yaw+sy+Math.cos(elapsed)*.008*moveAmt,roll+Math.sin(t*29)*.02*jolt,'YXZ');
+  camera.rotation.set(view.pitch+sx+Math.cos(elapsed*2)*.009*moveAmt+Math.sin(t*37)*.012*jolt+Math.sin(t*23)*.009*coughPulse,view.yaw+sy+Math.cos(elapsed)*.008*moveAmt,roll+Math.sin(t*29)*.02*jolt,'YXZ');
   const f=settings.fov+(settings.bob?Math.sin(t*.4)*.8+Math.sin(t*1.3)*.4-runAmt*3-jolt*1.5:0);if(Math.abs(camera.fov-f)>.01){camera.fov=f;camera.updateProjectionMatrix()}
-  vhsMat.uniforms.shake.value=jolt+runAmt*.5}
-let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?4.6:2.5)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(keys.has('ShiftLeft')||keys.has('ShiftRight')?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(keys.has('ShiftLeft')||keys.has('ShiftRight'))}else camera.position.y+=(1.7-camera.position.y)*.12}updateChunks();if(DBG_MAP)drawMap(now);ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight'));handheld(now,dt,mv,mv&&(keys.has('ShiftLeft')||keys.has('ShiftRight')));breathe();
+  vhsMat.uniforms.shake.value=jolt+runAmt*.5+coughPulse*.18}
+let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?4.6:2.5)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(keys.has('ShiftLeft')||keys.has('ShiftRight')?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(keys.has('ShiftLeft')||keys.has('ShiftRight'))}else {lastFootstep=0;camera.position.y+=(1.7-camera.position.y)*.12}}updateChunks();if(DBG_MAP)drawMap(now);ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight'));handheld(now,dt,mv,mv&&(keys.has('ShiftLeft')||keys.has('ShiftRight')));breathe();
 vhsMat.uniforms.time.value=now/1000%1000;renderer.setRenderTarget(rt);renderer.render(scene,camera);renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();while(queue.length)updateChunks();{const [x,z]=findSpawn();camera.position.set(x,1.7,z)}requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
 </script></body></html>
