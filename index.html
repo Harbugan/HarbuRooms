@@ -19,14 +19,20 @@ const camera=new THREE.PerspectiveCamera(78,innerWidth/innerHeight,.05,110);came
 const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
 // --- VHS post pass: scene renders into a half-float target, then a full-screen shader smears, wobbles, tints and vignettes it.
 let RES=.85;const rt=new THREE.WebGLRenderTarget(2,2,{type:THREE.HalfFloatType,samples:4,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
-const vhsMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tDiffuse:{value:rt.texture},time:{value:0},res:{value:new THREE.Vector2(1,1)},shake:{value:0},intensity:{value:.75}},
+const vhsMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tDiffuse:{value:rt.texture},time:{value:0},res:{value:new THREE.Vector2(1,1)},shake:{value:0},intensity:{value:.75},uReal:{value:0},uPost:{value:1},uGrain:{value:1},uVig:{value:1},uScan:{value:1},uHalo:{value:1},uCA:{value:1}},
 vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
-fragmentShader:`precision highp float;uniform sampler2D tDiffuse;uniform float time,shake,intensity;uniform vec2 res;varying vec2 vUv;
+fragmentShader:`precision highp float;uniform sampler2D tDiffuse;uniform float time,shake,intensity,uReal,uPost,uGrain,uVig,uScan,uHalo,uCA;uniform vec2 res;varying vec2 vUv;
 float h11(float x){return fract(sin(x*127.1)*43758.5453);}
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float n1(float x){float i=floor(x),f=fract(x);f=f*f*(3.-2.*f);return mix(h11(i),h11(i+1.),f);}
-vec3 enc(vec3 c){return pow(max(c,0.),vec3(1./2.2));}
+// Colour pipeline. tDiffuse holds LINEAR light. uReal=0 is the frozen ORIGINAL profile: pow(1/2.2) encode, and the bypass mix
+// below uses the raw linear frame (the historical behaviour, kept only so Original stays reproducible). uReal=1 is REALISTIC:
+// exact sRGB OETF everywhere, so the bypass path and the graded path are in the same (encoded) space.
+vec3 srgbOetf(vec3 c){c=clamp(c,0.,1.);return mix(c*12.92,1.055*pow(c,vec3(1./2.4))-.055,step(.0031308,c));}
+vec3 enc(vec3 c){return uReal>.5?srgbOetf(c):pow(max(c,0.),vec3(1./2.2));}
 void main(){
+  // post disabled: neutral, correctly encoded passthrough (skips every tap below)
+  if(uPost<.5){gl_FragColor=vec4(srgbOetf(texture2D(tDiffuse,vUv).rgb),1.);return;}
   vec2 uv=vUv;
   // slow tape wobble + head-switching noise along the bottom edge
   float bot=smoothstep(.07,0.,uv.y);
@@ -40,7 +46,7 @@ void main(){
   uv.x+=wob+shake*.0015*sin(uv.y*40.+time*60.);
   uv.y+=shake*.002*sin(time*50.);
   // horizontal chroma bleed (smeared luma, offset colour channels)
-  float px=1./res.x,ca=px*(2.2+bot*8.+band*10.);
+  float px=1./res.x,ca=px*(2.2+bot*8.+band*10.)*uCA;
   vec3 col=vec3(0.);float ws=0.;
   for(int k=-3;k<=3;k++){float w=exp(-float(k*k)*.22),o=float(k)*px*1.6;
     col+=w*vec3(texture2D(tDiffuse,uv+vec2(o+ca,0.)).r,texture2D(tDiffuse,uv+vec2(o,0.)).g,texture2D(tDiffuse,uv+vec2(o-ca,0.)).b);ws+=w;}
@@ -48,7 +54,7 @@ void main(){
   // dreamy halation: wide soft blur of bright areas bleeds into the picture
   vec3 glow=vec3(0.);for(int k=0;k<16;k++){float a=float(k)*2.39996,r=sqrt(float(k)+.5)/4.;vec2 o=vec2(cos(a),sin(a))*r*vec2(res.y/res.x,1.)*.06;
     vec3 c=texture2D(tDiffuse,uv+o).rgb;glow+=c*(1.-r*.6);}
-  glow/=12.;col=mix(col,glow,.22)+max(glow-.55,0.)*.55;
+  glow/=12.;col=mix(col,glow,.22*uHalo)+max(glow-.55,0.)*.55*uHalo;
   col=enc(col);
   // washed-out tape colour: desaturate, lift blacks, warm/magenta cast, soft highlight bloom
   float l=dot(col,vec3(.299,.587,.114));
@@ -56,18 +62,18 @@ void main(){
   col=col*vec3(1.04,1.0,.9)*.92+vec3(.035,.03,.04);
   col+=max(l-.72,0.)*vec3(.35,.3,.18);
   // scanlines
-  col*=1.-.2*(.5+.5*sin(vUv.y*330.*6.2832));
+  col*=1.-.2*uScan*(.5+.5*sin(vUv.y*330.*6.2832));
   // static grain, random bright dropout streaks, subtle brightness flicker
-  col+=(h21(vUv*res+fract(time)*91.)-.5)*.11;
+  col+=(h21(vUv*res+fract(time)*91.)-.5)*.11*uGrain;
   float row=floor(vUv.y*260.);
   if(h21(vec2(row,floor(time*25.)))>.9975)col+=.25*step(h21(vec2(row,7.)),.6);
   col+=band*(h21(vUv*res*.5+time)-.35)*.45;
   col*=1.+(h11(floor(time*24.))-.5)*.05;
   // heavy vignette + darkened corners
   vec2 q=(vUv-.5)*vec2(1.08,1.);float v=length(q)*1.35;
-  col*=1.-smoothstep(.4,1.05,v)*.8;
+  col*=max(1.-smoothstep(.4,1.05,v)*.8*uVig,0.);
   col*=smoothstep(0.,.03,vUv.y)*.35+.65;
-  vec3 clean=texture2D(tDiffuse,vUv).rgb;col=mix(clean,col,intensity);gl_FragColor=vec4(col,1.);}`});
+  vec3 clean=texture2D(tDiffuse,vUv).rgb;if(uReal>.5)clean=srgbOetf(clean);col=mix(clean,col,intensity);gl_FragColor=vec4(col,1.);}`});
 const postScene=new THREE.Scene(),postCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),vhsMat));
 function sizePost(){const pr=renderer.getPixelRatio();rt.setSize(Math.max(2,Math.round(innerWidth*pr*RES)),Math.max(2,Math.round(innerHeight*pr*RES)));vhsMat.uniforms.res.value.set(innerWidth*pr,innerHeight*pr)}sizePost();
 // Lighting is baked into vertex colours (see Builder), so only cheap global lights are needed. No per-chunk PointLights.
@@ -419,10 +425,19 @@ function drawMap(now){if(now-mapAt<250)return;mapAt=now;
 /* ---- AUDIO: lysstofrør-brummen, drømmende ekko-skridt, vejrtrækning ---- */
 let hum,AUD=null,stepN=null,masterGain=null;
 let introDuck=1,lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
-const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100,introEnabled:1,introDuration:8,introFall:1,introShake:.35,introBreath:.25,introImpact:.5,introDuck:.6,envEnabled:1,envWear:8,envDamp:3,envCeil:2,envIntensity:25,envShow:0};
+const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100,introEnabled:1,introDuration:8,introFall:1,introShake:.35,introBreath:.25,introImpact:.5,introDuck:.6,envEnabled:1,envWear:8,envDamp:3,envCeil:2,envIntensity:25,envShow:0,
+  visProfile:0,visPost:1}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
 let devSaved={};try{devSaved=JSON.parse(localStorage.getItem('nullrooms.dev')||'{}')||{}}catch(e){}
+// VISUAL / RENDERING: one gain set per profile, so tuning Realistic never touches Original. Defaults are 100 % = the look the post shader always had.
+const VIS_FX=[['grain','Grain intensity','uGrain'],['vig','Vignette intensity','uVig'],['scan','Scanline intensity','uScan'],['halo','Halation intensity','uHalo'],['ca','Chromatic aberration','uCA']];
+for(const [k] of VIS_FX){DEV_DEFAULT['visO_'+k]=100;DEV_DEFAULT['visR_'+k]=100}
 const devValues={...DEV_DEFAULT,...devSaved};let devGains=null,devOpen=false;
 function devScale(k){return Math.max(0,Math.min(200,Number(devValues[k])||0))/100}
+// Live apply: only uniform writes (no shader recompilation, no render-target change, no world rebuild).
+function visPrefix(){return devValues.visProfile===1?'visR_':'visO_'}
+function applyVisual(){const u=vhsMat.uniforms,pre=visPrefix();u.uReal.value=devValues.visProfile===1?1:0;u.uPost.value=devValues.visPost?1:0;
+  for(const [k,,uni] of VIS_FX){const v=Number(devValues[pre+k]);u[uni].value=(Number.isFinite(v)?Math.max(0,Math.min(200,v)):100)/100}}
+applyVisual();
 function applyDevGains(){if(!devGains)return;for(const k of ['hum','footsteps','breathing','cough'])devGains[k].gain.value=devScale(k)*(k==='hum'?introDuck:1);devGains.reverb.gain.value=.09*devScale('reverb')}
 
 const AUDIO_ROOT='assets/audio/level0/';
@@ -792,11 +807,27 @@ function applyEnv(){matSystem?.setEnvironment({enabled:Number(devValues.envEnabl
   input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};
   row.append(cap,input,out);devControls.append(row)}
  applyEnv()}
+// VISUAL / RENDERING section: profile switch (also F4 during play), post on/off, per-profile effect gains.
+const visToast=document.createElement('div');visToast.style.cssText='position:fixed;left:50%;bottom:9%;transform:translateX(-50%);padding:4px 10px;background:rgba(0,0,0,.6);color:#dce3dc;font:12px monospace;pointer-events:none;opacity:0;transition:opacity .25s;z-index:30';document.body.append(visToast);let visToastT=0;
+const visSave=()=>{try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}};
+function setVisProfile(p){devValues.visProfile=p?1:0;applyVisual();visSave();devSync.forEach(fn=>fn());
+  visToast.textContent='RENDER PROFILE: '+(p?'REALISTIC':'ORIGINAL');visToast.style.opacity=1;clearTimeout(visToastT);visToastT=setTimeout(()=>{visToast.style.opacity=0},1400)}
+{const h=document.createElement('h3');h.textContent='VISUAL / RENDERING';devControls.append(h);
+ const pb=document.createElement('button');pb.onclick=()=>setVisProfile(devValues.visProfile?0:1);devSync.push(()=>{pb.textContent='PROFILE: '+(devValues.visProfile===1?'REALISTIC':'ORIGINAL')+'  (click or F4 to switch)'});pb.textContent='PROFILE';devControls.append(pb);
+ const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';en.append(cb,' Post-processing enabled (off = clean sRGB frame)');
+ cb.onchange=()=>{devValues.visPost=cb.checked?1:0;applyVisual();visSave()};devSync.push(()=>{cb.checked=!!devValues.visPost});devControls.append(en);
+ for(const [k,label] of VIS_FX){const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output');
+  cap.textContent=label;input.type='range';input.min=0;input.max=200;input.step=1;
+  const sync=()=>{const v=devValues[visPrefix()+k];input.value=v;out.textContent=v+'%'};devSync.push(sync);sync();
+  input.oninput=()=>{devValues[visPrefix()+k]=Number(input.value);applyVisual();visSave();sync()};
+  row.append(cap,input,out);devControls.append(row)}
+ const rb=document.createElement('button');rb.textContent='RESET THIS PROFILE';rb.onclick=()=>{for(const [k] of VIS_FX)devValues[visPrefix()+k]=100;applyVisual();visSave();devSync.forEach(fn=>fn())};devControls.append(rb)}
+addEventListener('keydown',e=>{if(e.code==='F4'){e.preventDefault();setVisProfile(devValues.visProfile?0:1)}});
 const devPadInvert=document.querySelector('#devPadInvert');devSync.push(()=>{devPadInvert.checked=!!settings.padInvertY});devPadInvert.onchange=()=>{settings.padInvertY=devPadInvert.checked;applySettings();document.getElementById('padInvertY').checked=settings.padInvertY};
 function devRefresh(){devSync.forEach(fn=>fn());document.querySelector('#devStatus').textContent='Audio: '+(AUD?.ctx.state||'not started')+' | '+['footsteps','breathing_idle','cough'].map(k=>k+': '+(audioBuffers[k]?.length?'file':'fallback')).join(' / ')}
 function toggleDev(open){devOpen=open;devPanel.hidden=!open;if(open){if(padMode)pauseGame(true);if(document.pointerLockElement===renderer.domElement)document.exitPointerLock();devRefresh()}else if(hasStarted&&overlay.style.display==='none')renderer.domElement.requestPointerLock().catch(()=>showMenu())}
 document.querySelector('#devClose').onclick=()=>toggleDev(false);
-document.querySelector('#devReset').onclick=()=>{Object.assign(devValues,DEV_DEFAULT);applyDevGains();applyEnv();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}devRefresh()};
+document.querySelector('#devReset').onclick=()=>{Object.assign(devValues,DEV_DEFAULT);applyDevGains();applyEnv();applyVisual();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}devRefresh()};
 document.querySelector('#devCopy').onclick=()=>{const data=JSON.stringify({audio:devValues,settings},null,2);navigator.clipboard?.writeText(data).catch(()=>console.info(data))};
 for(const button of devPanel.querySelectorAll('[data-sound]'))button.onclick=()=>{
  startHum();const t=AUD?.ctx.currentTime+.03;if(!AUD)return;
