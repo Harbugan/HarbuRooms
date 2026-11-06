@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>THE BACKROOMS // v0.1</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#0c0a04;color:#dce3dc;font-family:monospace}canvas{display:block}#hud{position:fixed;top:20px;left:22px;pointer-events:none;text-shadow:0 2px 8px #000}#hud strong{font-size:15px;letter-spacing:3px}#status{font-size:11px;opacity:.7;margin-top:9px}#cross{position:fixed;left:50%;top:50%;width:4px;height:4px;border:1px solid #fff8;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}#overlay{position:fixed;inset:0;background:#0c0a04db;display:flex;align-items:center;justify-content:center;z-index:5}#panel{width:min(460px,85vw);padding:32px;border:1px solid #cbb85a55;background:#2a2410e8;box-shadow:0 20px 90px #000a}h1{letter-spacing:5px;font-size:25px}p{line-height:1.8;color:#acb9b7}button{padding:13px 23px;background:#d8c85a;border:0;color:#2a2410;font:700 13px monospace;cursor:pointer}button:hover{background:#fff}small{display:block;margin-top:20px;color:#82938e;line-height:1.8}#error{color:#ffb0a0}#cam{position:fixed;inset:0;pointer-events:none;font:22px/1.25 monospace;color:#f2f2ea;letter-spacing:2px;text-shadow:2px 0 #f006,-2px 0 #0ff5,0 0 6px #fff6}#rec{position:absolute;top:22px;right:28px;display:flex;align-items:center;gap:9px}#dot{width:13px;height:13px;border-radius:50%;background:#e22;box-shadow:0 0 8px #e22;animation:blink 1.2s steps(1) infinite}@keyframes blink{50%{opacity:0}}#stamp{position:absolute;left:28px;bottom:26px}#tc{position:absolute;right:28px;bottom:26px}@media(max-width:600px){#cam{font-size:15px}}#panel{max-height:88vh;overflow:auto}#menuActions{display:flex;gap:9px;flex-wrap:wrap;margin:14px 0}#menuActions button,#backBtn{background:#504a29;color:#f1eac5;border:1px solid #8c8050}#settings{display:none;border-top:1px solid #cbb85a55;padding-top:12px;margin-top:14px}.setting{display:flex;justify-content:space-between;align-items:center;gap:20px;margin:12px 0;color:#e2dbba;font-size:12px}.setting input[type=range]{width:155px;accent-color:#d8c85a}.setting select{background:#252213;color:#e2dbba;border:1px solid #82764b;padding:7px}.setting input[type=checkbox]{accent-color:#d8c85a}#settings h2{font-size:13px;letter-spacing:3px;color:#d8c85a;margin-top:20px}#backBtn{margin-top:10px}#settings label{cursor:pointer}</style></head><body><div id="hud"><strong>THE BACKROOMS <span style="opacity:.45">/ v0.1</span></strong><div id="status">SECTOR 0,0 · SIGNAL STABLE</div></div><div id="cam"><div id="rec"><i id="dot"></i>REC</div><div id="stamp">PLAY &#9654;<br><span id="date">OCT 31 1996 03:14:07</span></div><div id="tc">SP 0:00:00</div></div><div id="cross"></div><div id="overlay"><div id="panel"><h1>THE BACKROOMS</h1><p>If you're not careful and you noclip out of reality in the wrong areas, you'll end up in the Backrooms.</p><button id="start">ENTER THE ROOMS</button><div id="menuActions"><button id="settingsBtn" type="button">SETTINGS</button><button id="fullscreenBtn" type="button">FULLSCREEN</button><button id="exitBtn" type="button" style="display:none">EXIT TO TITLE</button></div><div id="settings"><h2>VIDEO</h2><div class="setting"><label for="quality">RENDER QUALITY</label><select id="quality"><option value="low">PERFORMANCE</option><option value="medium">BALANCED</option><option value="high">HIGH</option></select></div><div class="setting"><label for="vhs">VHS INTENSITY <output id="vhsValue"></output></label><input id="vhs" type="range" min="0" max="100" step="5"></div><div class="setting"><label for="fov">FIELD OF VIEW <output id="fovValue"></output></label><input id="fov" type="range" min="60" max="105"></div><h2>CONTROLS</h2><div class="setting"><label for="sensitivity">MOUSE SENSITIVITY <output id="sensitivityValue"></output></label><input id="sensitivity" type="range" min="10" max="100"></div><div class="setting"><label for="bob">HEAD BOBBING</label><input id="bob" type="checkbox"></div><h2>AUDIO</h2><div class="setting"><label for="volume">MASTER VOLUME <output id="volumeValue"></output></label><input id="volume" type="range" min="0" max="100"></div><button id="backBtn" type="button">BACK</button></div><small>WASD / arrow keys — move<br>MOUSE — look around<br>SHIFT — run · ESC — pause<br>Headphones recommended</small><p id="error"></p></div></div><script>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>THE BACKROOMS // v0.1</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#0c0a04;color:#dce3dc;font-family:monospace}canvas{display:block}#hud{position:fixed;top:20px;left:22px;pointer-events:none;text-shadow:0 2px 8px #000}#hud strong{font-size:15px;letter-spacing:3px}#status{font-size:11px;opacity:.7;margin-top:9px}#cross{position:fixed;left:50%;top:50%;width:4px;height:4px;border:1px solid #fff8;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}#overlay{position:fixed;inset:0;background:#0c0a04db;display:flex;align-items:center;justify-content:center;z-index:5}#panel{width:min(460px,85vw);padding:32px;border:1px solid #cbb85a55;background:#2a2410e8;box-shadow:0 20px 90px #000a}h1{letter-spacing:5px;font-size:25px}p{line-height:1.8;color:#acb9b7}button{padding:13px 23px;background:#d8c85a;border:0;color:#2a2410;font:700 13px monospace;cursor:pointer}button:hover{background:#fff}small{display:block;margin-top:20px;color:#82938e;line-height:1.8}#error{color:#ffb0a0}#cam{position:fixed;inset:0;pointer-events:none;font:22px/1.25 monospace;color:#f2f2ea;letter-spacing:2px;text-shadow:2px 0 #f006,-2px 0 #0ff5,0 0 6px #fff6}#rec{position:absolute;top:22px;right:28px;display:flex;align-items:center;gap:9px}#dot{width:13px;height:13px;border-radius:50%;background:#e22;box-shadow:0 0 8px #e22;animation:blink 1.2s steps(1) infinite}@keyframes blink{50%{opacity:0}}#stamp{position:absolute;left:28px;bottom:26px}#tc{position:absolute;right:28px;bottom:26px}@media(max-width:600px){#cam{font-size:15px}}#panel{max-height:88vh;overflow:auto}#menuActions{display:flex;gap:9px;flex-wrap:wrap;margin:14px 0}#menuActions button,#backBtn{background:#504a29;color:#f1eac5;border:1px solid #8c8050}#settings{display:none;border-top:1px solid #cbb85a55;padding-top:12px;margin-top:14px}.setting{display:flex;justify-content:space-between;align-items:center;gap:20px;margin:12px 0;color:#e2dbba;font-size:12px}.setting input[type=range]{width:155px;accent-color:#d8c85a}.setting select{background:#252213;color:#e2dbba;border:1px solid #82764b;padding:7px}.setting input[type=checkbox]{accent-color:#d8c85a}#settings h2{font-size:13px;letter-spacing:3px;color:#d8c85a;margin-top:20px}#backBtn{margin-top:10px}#settings label{cursor:pointer}#devtools{position:fixed;z-index:30;right:12px;top:12px;width:min(340px,90vw);max-height:90vh;overflow:auto;background:#111b1df2;color:#e5eee9;border:1px solid #698d80;padding:15px;font:12px monospace}#devtools[hidden]{display:none}#devtools h3{color:#a6e3bd}#devtools label{display:grid;grid-template-columns:1fr 110px 38px;gap:6px;align-items:center;margin:10px 0}#devtools input{width:100%;accent-color:#a6e3bd}#devtools button{padding:7px;margin:3px;background:#344642;color:#fff;border:1px solid #698d80;font:11px monospace}</style></head><body><aside id="devtools" hidden><h3>NULL ROOMS // DEBUG [F3]</h3><p>Live tuning — saved locally</p><div id="devControls"></div><h3>TEST AUDIO</h3><button data-sound="step">STEP</button><button data-sound="breath">BREATH</button><button data-sound="cough">COUGH</button><button data-sound="flicker">FLICKER</button><p id="devStatus"></p><button id="devReset">RESET</button><button id="devCopy">COPY CONFIG</button><button id="devClose">CLOSE / RESUME</button></aside><div id="hud"><strong>THE BACKROOMS <span style="opacity:.45">/ v0.1</span></strong><div id="status">SECTOR 0,0 · SIGNAL STABLE</div></div><div id="cam"><div id="rec"><i id="dot"></i>REC</div><div id="stamp">PLAY &#9654;<br><span id="date">OCT 31 1996 03:14:07</span></div><div id="tc">SP 0:00:00</div></div><div id="cross"></div><div id="overlay"><div id="panel"><h1>THE BACKROOMS</h1><p>If you're not careful and you noclip out of reality in the wrong areas, you'll end up in the Backrooms.</p><button id="start">ENTER THE ROOMS</button><div id="menuActions"><button id="settingsBtn" type="button">SETTINGS</button><button id="fullscreenBtn" type="button">FULLSCREEN</button><button id="exitBtn" type="button" style="display:none">EXIT TO TITLE</button></div><div id="settings"><h2>VIDEO</h2><div class="setting"><label for="quality">RENDER QUALITY</label><select id="quality"><option value="low">PERFORMANCE</option><option value="medium">BALANCED</option><option value="high">HIGH</option></select></div><div class="setting"><label for="vhs">VHS INTENSITY <output id="vhsValue"></output></label><input id="vhs" type="range" min="0" max="100" step="5"></div><div class="setting"><label for="fov">FIELD OF VIEW <output id="fovValue"></output></label><input id="fov" type="range" min="60" max="105"></div><h2>CONTROLS</h2><div class="setting"><label for="sensitivity">MOUSE SENSITIVITY <output id="sensitivityValue"></output></label><input id="sensitivity" type="range" min="10" max="100"></div><div class="setting"><label for="bob">HEAD BOBBING</label><input id="bob" type="checkbox"></div><h2>AUDIO</h2><div class="setting"><label for="volume">MASTER VOLUME <output id="volumeValue"></output></label><input id="volume" type="range" min="0" max="100"></div><button id="backBtn" type="button">BACK</button></div><small>WASD / arrow keys — move<br>MOUSE — look around<br>SHIFT — run · ESC — pause<br>Headphones recommended</small><p id="error"></p></div></div><script>
 window.addEventListener('error',event=>{const el=document.querySelector('#error');if(el)el.textContent='Startup error: '+(event.message||'Unknown error');});
 window.addEventListener('unhandledrejection',event=>{const el=document.querySelector('#error');if(el)el.textContent='Startup error: '+(event.reason?.message||String(event.reason));});
 </script><script type="module">
@@ -419,6 +419,12 @@ function drawMap(now){if(now-mapAt<250)return;mapAt=now;
 /* ---- AUDIO: lysstofrør-brummen, drømmende ekko-skridt, vejrtrækning ---- */
 let hum,AUD=null,stepN=null,masterGain=null;
 let lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
+const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100};
+let devSaved={};try{devSaved=JSON.parse(localStorage.getItem('nullrooms.dev')||'{}')||{}}catch(e){}
+const devValues={...DEV_DEFAULT,...devSaved};let devGains=null,devOpen=false;
+function devScale(k){return Math.max(0,Math.min(200,Number(devValues[k])||0))/100}
+function applyDevGains(){if(!devGains)return;for(const k of ['hum','footsteps','breathing','cough'])devGains[k].gain.value=devScale(k);devGains.reverb.gain.value=.09*devScale('reverb')}
+
 const AUDIO_ROOT='assets/audio/level0/';
 let audioBuffers={},audioManifest=null,audioLoading=null,audioStepIndex=0;
 async function loadLevel0Audio(ctx){
@@ -443,7 +449,7 @@ async function loadLevel0Audio(ctx){
   })();
   return audioLoading;
 }
-function playLevel0Sample(name,t,gain){
+function playLevel0Sample(name,t,gain,target){
   if(!AUD)return false;
   const samples=audioBuffers[name];
   if(!samples||!samples.length)return false;
@@ -451,7 +457,7 @@ function playLevel0Sample(name,t,gain){
   const index=name==='footsteps'?(audioStepIndex++%samples.length):Math.floor(Math.random()*samples.length);
   src.buffer=samples[index];
   amp.gain.value=gain*(typeof cfg.gain==='number'?Math.max(0,Math.min(2,cfg.gain)):1);
-  src.connect(amp).connect(AUD.foley);src.start(t);
+  src.connect(amp).connect(target||AUD.foley);src.start(t);
   src.onended=()=>{src.disconnect();amp.disconnect()};
   return true;
 }
@@ -467,21 +473,24 @@ try{const a=new (window.AudioContext||window.webkitAudioContext)(),sr=a.sampleRa
   wet.connect(dl);dl.connect(dlp);dlp.connect(fb);fb.connect(dl);dlp.connect(eo).connect(out);dlp.connect(rv);
   const wob=a.createOscillator(),wg=a.createGain();wob.frequency.value=.27;wg.gain.value=.005;wob.connect(wg).connect(dl.delayTime);wob.start();
   // lysstofrør: 100 Hz ballast-brum (50 Hz net) med overtoner, svag højfrekvent summen og hvislen
-  const bz=a.createGain(),bl=filt('lowpass',720),bs=a.createGain();bz.gain.value=.055;bs.gain.value=.22;bl.connect(bz);bz.connect(out);bz.connect(bs).connect(wet);
+  const humBus=a.createGain();humBus.connect(out);
+  const bz=a.createGain(),bl=filt('lowpass',720),bs=a.createGain();bz.gain.value=.055;bs.gain.value=.22;bl.connect(bz);bz.connect(humBus);bz.connect(bs).connect(wet);
   for(const [f,v,ty] of [[50,.18,'sine'],[100,.5,'sawtooth'],[200,.28,'sawtooth'],[300,.15,'sawtooth'],[400,.06,'square']]){const o=a.createOscillator(),g=a.createGain();o.type=ty;o.frequency.value=f;o.detune.value=R(-3,3);g.gain.value=v;o.connect(g).connect(bl);o.start()}
   const lf=a.createOscillator(),lg=a.createGain();lf.frequency.value=.13;lg.gain.value=.008;lf.connect(lg).connect(bz.gain);lf.start();
-  const wh=a.createOscillator(),whg=a.createGain();wh.frequency.value=7200;whg.gain.value=.006;wh.connect(whg).connect(out);wh.start();
-  const hs=a.createBufferSource(),hf=filt('bandpass',5200,.8),hg=a.createGain();hs.buffer=nbuf;hs.loop=true;hg.gain.value=.004;hs.connect(hf).connect(hg).connect(out);hs.start();
-  const click=(t,v)=>{const s=a.createBufferSource(),f=filt('bandpass',R(1800,5200),.9),g=a.createGain(),w=a.createGain();s.buffer=nbuf;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.0001,t+R(.004,.016));w.gain.value=.3;s.connect(f).connect(g);g.connect(out);g.connect(w).connect(wet);s.start(t,R(0,3),.04)};
+  const wh=a.createOscillator(),whg=a.createGain();wh.frequency.value=7200;whg.gain.value=.006;wh.connect(whg).connect(humBus);wh.start();
+  const hs=a.createBufferSource(),hf=filt('bandpass',5200,.8),hg=a.createGain();hs.buffer=nbuf;hs.loop=true;hg.gain.value=.004;hs.connect(hf).connect(hg).connect(humBus);hs.start();
+  const click=(t,v)=>{const s=a.createBufferSource(),f=filt('bandpass',R(1800,5200),.9),g=a.createGain(),w=a.createGain();s.buffer=nbuf;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.0001,t+R(.004,.016));w.gain.value=.3;s.connect(f).connect(g);g.connect(humBus);g.connect(w).connect(wet);s.start(t,R(0,3),.04)};
   const dip=t=>{bz.gain.cancelScheduledValues(t);bz.gain.setValueAtTime(.055,t);bz.gain.linearRampToValueAtTime(.014,t+.02);bz.gain.linearRampToValueAtTime(.068,t+.13);bz.gain.linearRampToValueAtTime(.055,t+.32)};
   const flicker=(v=1)=>{const t=a.currentTime+.01,n=3+Math.floor(Math.random()*6);dip(t);for(let i=0;i<n;i++)click(t+i*R(.015,.065),R(.05,.13)*v)};
   const tick=()=>{if(Math.random()<.16)flicker(.7);else click(a.currentTime+.02,R(.03,.08));setTimeout(tick,R(300,2900))};tick();
   // Player foley: short, carpet-damped noises with very little early reflection.
   const foley=a.createGain();foley.gain.value=1;foley.connect(out);
+  const stepBus=a.createGain(),breathBus=a.createGain(),coughBus=a.createGain();stepBus.connect(foley);breathBus.connect(foley);coughBus.connect(foley);
   const room=a.createConvolver(),roomWet=a.createGain(),irLen=Math.floor(sr*.19);
   const roomIR=a.createBuffer(2,irLen,sr);
   for(let c=0;c<2;c++){const d=roomIR.getChannelData(c);let lp=0;for(let i=0;i<irLen;i++){lp+=(Math.random()*2-1-lp)*.14;d[i]=lp*Math.exp(-i/sr*33)*.24}}
   room.buffer=roomIR;roomWet.gain.value=.09;foley.connect(room).connect(roomWet).connect(out);
+  devGains={hum:humBus,footsteps:stepBus,breathing:breathBus,cough:coughBus,reverb:roomWet};applyDevGains();
   const voice=a.createGain(),voiceLP=filt('lowpass',950);voice.gain.value=1;voiceLP.connect(voice).connect(foley);
   const puff=(t,duration,level,low,high,target=foley)=>{
     const src=a.createBufferSource(),bp=filt('bandpass',Math.sqrt(low*high),.45),lp=filt('lowpass',high),env=a.createGain();
@@ -489,7 +498,7 @@ try{const a=new (window.AudioContext||window.webkitAudioContext)(),sr=a.sampleRa
     env.gain.exponentialRampToValueAtTime(.00001,t+duration);
     src.connect(bp).connect(lp).connect(env).connect(target);src.start(t,R(0,3),duration+.01);
   };
-  AUD={flicker,ctx:a,foley,voiceLP,puff};
+  AUD={flicker,ctx:a,foley,voiceLP,puff,stepBus,breathBus,coughBus};
   void loadLevel0Audio(a);
   nextBreath=a.currentTime+1.5;nextCough=a.currentTime+R(18,32);
 }catch(e){console.warn('Audio unavailable',e)}}
@@ -499,9 +508,9 @@ function footfalls(run){
   if(t-lastFootstep<interval)return;
   lastFootstep=t;
   const v=(run?.22:.16)*(.83+Math.random()*.34);
-  if(!playLevel0Sample('footsteps',t,run?.30:.24)){
-    AUD.puff(t,.11+Math.random()*.055,v,85,580);
-    AUD.puff(t+.055,.09,v*.38,100,400);
+  if(!playLevel0Sample('footsteps',t,run?.30:.24,AUD.stepBus)){
+    AUD.puff(t,.11+Math.random()*.055,v,85,580,AUD.stepBus);
+    AUD.puff(t+.055,.09,v*.38,100,400,AUD.stepBus);
   }
 }
 function breathe(){
@@ -510,15 +519,15 @@ function breathe(){
   if(t>=nextBreath){
     const running=runAmt>.5;
     const duration=running?1.05:1.45;
-    if(!playLevel0Sample(running?'breathing_run':'breathing_idle',t,running?.32:.23))
-      AUD.puff(t,duration,running?.065:.038,160,1250,AUD.voiceLP);
+    if(!playLevel0Sample(running?'breathing_run':'breathing_idle',t,running?.32:.23,AUD.breathBus))
+      AUD.puff(t,duration,running?.065:.038,160,1250,AUD.breathBus);
     nextBreath=t+(running?2.25:3.8)+Math.random()*.55;
   }
   if(t>=nextCough){
     // Rare, soft double burst; the camera receives a matching short impulse.
-    if(!playLevel0Sample('cough',t,.30)){
-      AUD.puff(t,.17,.16,180,1800,AUD.voiceLP);
-      AUD.puff(t+.19,.21,.11,150,1500,AUD.voiceLP);
+    if(!playLevel0Sample('cough',t,.30,AUD.coughBus)){
+      AUD.puff(t,.17,.16,180,1800,AUD.coughBus);
+      AUD.puff(t+.19,.21,.11,150,1500,AUD.coughBus);
     }
     coughPulse=1;
     nextCough=t+65+Math.random()*145;
@@ -546,16 +555,50 @@ for(const k of Object.keys(DEFAULT_SETTINGS)){
   el.addEventListener('input',()=>{settings[k]=el.type==='checkbox'?el.checked:el.type==='range'?Number(el.value):el.value;if(out)out.textContent=settings[k]+(k==='fov'?'°':'%');applySettings()});
 }
 applySettings();
-function showMenu(){overlay.style.display='flex';settingsPanel.style.display=showSettings?'block':'none';start.style.display=showSettings?'none':'inline-block';settingsBtn.style.display=showSettings?'none':'inline-block';fullscreenBtn.style.display=showSettings?'none':'inline-block';exitBtn.style.display=hasStarted&&!showSettings?'inline-block':'none';start.textContent=hasStarted?'RESUME EXPLORING':'ENTER THE ROOMS';}
+function showMenu(){if(devOpen)return;overlay.style.display='flex';settingsPanel.style.display=showSettings?'block':'none';start.style.display=showSettings?'none':'inline-block';settingsBtn.style.display=showSettings?'none':'inline-block';fullscreenBtn.style.display=showSettings?'none':'inline-block';exitBtn.style.display=hasStarted&&!showSettings?'inline-block':'none';start.textContent=hasStarted?'RESUME EXPLORING':'ENTER THE ROOMS';}
 settingsBtn.onclick=()=>{showSettings=true;showMenu()};
 document.querySelector('#backBtn').onclick=()=>{showSettings=false;showMenu()};
 fullscreenBtn.onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch(e){document.querySelector('#error').textContent='Fullscreen unavailable: '+e.message}};
 document.addEventListener('fullscreenchange',()=>{fullscreenBtn.textContent=document.fullscreenElement?'WINDOWED':'FULLSCREEN'});
 exitBtn.onclick=()=>{if(masterGain&&hum)masterGain.gain.setTargetAtTime(0,hum.currentTime,.08);hasStarted=false;showSettings=false;keys.clear();look.yaw=view.yaw=0;look.pitch=view.pitch=0;const p=findSpawn();camera.position.set(p[0],1.7,p[1]);showMenu()};
-start.onclick=async()=>{showSettings=false;startHum();if(masterGain&&hum)masterGain.gain.setTargetAtTime(settings.volume/100,hum.currentTime,.08);try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock()}catch(error){document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}};
-document.addEventListener('pointerlockchange',()=>{playing=document.pointerLockElement===renderer.domElement;if(playing){hasStarted=true;overlay.style.display='none'}else{keys.clear();showMenu()}});
+start.onclick=async()=>{devOpen=false;devPanel.hidden=true;showSettings=false;startHum();if(masterGain&&hum)masterGain.gain.setTargetAtTime(settings.volume/100,hum.currentTime,.08);try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock()}catch(error){document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}};
+document.addEventListener('pointerlockchange',()=>{playing=document.pointerLockElement===renderer.domElement;if(playing){hasStarted=true;overlay.style.display='none'}else{keys.clear();if(!devOpen)showMenu()}});
 document.addEventListener('mousemove',e=>{if(!playing)return;const factor=.002*settings.sensitivity/50;look.yaw-=e.movementX*factor;look.pitch=Math.max(-1.48,Math.min(1.48,look.pitch-e.movementY*factor))});
 const keys=new Set();addEventListener('keydown',e=>{if(!playing)return;keys.add(e.code);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));addEventListener('keydown',e=>{if(e.code==='F8'&&matSystem){e.preventDefault();matSystem.toggle(scene);console.info('[materials] mode:',matSystem.mode)}});addEventListener('blur',()=>keys.clear());camera.position.set(8,1.7,4);showMenu();
+
+const devRegistry=[
+['AUDIO','hum','Fluorescent hum',0,200],['AUDIO','footsteps','Carpet footsteps',0,200],
+['AUDIO','breathing','Breathing',0,200],['AUDIO','cough','Cough',0,200],['AUDIO','reverb','Foley reverb',0,200],
+['SETTINGS','volume','Master volume',0,100],['SETTINGS','vhs','VHS intensity',0,100],
+['SETTINGS','fov','Field of view',60,105],['SETTINGS','sensitivity','Mouse sensitivity',10,100]
+];
+const devPanel=document.querySelector('#devtools'),devControls=document.querySelector('#devControls');
+let devSection='',devSync=[];
+for(const [section,key,label,min,max] of devRegistry){
+ if(section!==devSection){devSection=section;const h=document.createElement('h3');h.textContent=section;devControls.append(h)}
+ const row=document.createElement('label'),caption=document.createElement('span'),input=document.createElement('input'),output=document.createElement('output');
+ caption.textContent=label;input.type='range';input.min=min;input.max=max;
+ const regular=section==='SETTINGS',read=()=>regular?settings[key]:devValues[key];
+ const sync=()=>{input.value=read();output.textContent=read()+(key==='fov'?'°':'%')};devSync.push(sync);sync();
+ input.oninput=()=>{const value=Number(input.value);if(regular){settings[key]=value;applySettings();const el=document.getElementById(key);if(el){el.value=value;const out=document.getElementById(key+'Value');if(out)out.textContent=value+(key==='fov'?'°':'%')}}else{devValues[key]=value;applyDevGains();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}}sync()};
+ row.append(caption,input,output);devControls.append(row);
+}
+function devRefresh(){devSync.forEach(fn=>fn());document.querySelector('#devStatus').textContent='Audio: '+(AUD?.ctx.state||'not started')+' | '+['footsteps','breathing_idle','cough'].map(k=>k+': '+(audioBuffers[k]?.length?'file':'fallback')).join(' / ')}
+function toggleDev(open){devOpen=open;devPanel.hidden=!open;if(open){if(document.pointerLockElement===renderer.domElement)document.exitPointerLock();devRefresh()}else if(hasStarted&&overlay.style.display==='none')renderer.domElement.requestPointerLock().catch(()=>showMenu())}
+document.querySelector('#devClose').onclick=()=>toggleDev(false);
+document.querySelector('#devReset').onclick=()=>{Object.assign(devValues,DEV_DEFAULT);applyDevGains();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}devRefresh()};
+document.querySelector('#devCopy').onclick=()=>{const data=JSON.stringify({audio:devValues,settings},null,2);navigator.clipboard?.writeText(data).catch(()=>console.info(data))};
+for(const button of devPanel.querySelectorAll('[data-sound]'))button.onclick=()=>{
+ startHum();const t=AUD?.ctx.currentTime+.03;if(!AUD)return;
+ const type=button.dataset.sound;
+ if(type==='flicker')AUD.flicker();
+ if(type==='step'&&!playLevel0Sample('footsteps',t,.24,AUD.stepBus))AUD.puff(t,.16,.16,85,580,AUD.stepBus);
+ if(type==='breath'&&!playLevel0Sample('breathing_idle',t,.23,AUD.breathBus))AUD.puff(t,1.45,.038,160,1250,AUD.breathBus);
+ if(type==='cough'){if(!playLevel0Sample('cough',t,.30,AUD.coughBus))AUD.puff(t,.2,.16,180,1800,AUD.coughBus);coughPulse=1}
+ devRefresh();
+};
+addEventListener('keydown',e=>{if(e.code==='F3'){e.preventDefault();toggleDev(!devOpen)}});
+
 function collide(x,z){const cx=Math.floor(x/tile),cz=Math.floor(z/tile);for(let a=cx-1;a<=cx+1;a++)for(let b=cz-1;b<=cz+1;b++){const g=chunks.get(a+','+b);if(!g)continue;for(const w of g.userData.walls){if(Math.abs(x-w.x)<w.w/2+.37&&Math.abs(z-w.z)<w.d/2+.37)return true}}return false}
 // Spawn on the first free spot spiralling out from the middle of chunk 0,0.
 function findSpawn(){for(let r=0;r<8;r+=.5)for(let a=0;a<24;a++){const x=8+Math.cos(a/24*6.2832)*r,z=8+Math.sin(a/24*6.2832)*r;if(!collide(x,z))return [x,z]}return [8.5,8.5]}
