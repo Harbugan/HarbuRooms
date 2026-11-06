@@ -87,6 +87,8 @@ const LIGHT={sky:0xfff3df,ground:0xe4e0d4,hemi:2.25, // hemi = base intensity; f
   ...(LIGHT_SETS[new URLSearchParams(location.search).get('lighting')]||LIGHT_SETS.soft)};
 const shoulder=x=>x<LIGHT.knee?x:Math.min(LIGHT.max,LIGHT.knee+(LIGHT.max-LIGHT.knee)*(1-Math.exp(-(x-LIGHT.knee)/Math.max(1e-6,LIGHT.max-LIGHT.knee))));
 const ambient=new THREE.HemisphereLight(LIGHT.sky,LIGHT.ground,LIGHT.hemi);scene.add(ambient);scene.add(camera);
+// ?gen=legacy restores the per-chunk room generator (comparison baseline); the default is the global room structure below.
+const GEN_LEGACY=new URLSearchParams(location.search).get('gen')==='legacy';
 // --- GEN START: pure, deterministic level layout (no Three.js) — every chunk can be rebuilt from its coordinates alone.
 const tile=16, N=16, range=4, chunks=new Map(), H=2.9, DOOR_TOP=2.25, CB=8; // 16 x 1 m cells per chunk, low oppressive ceiling
 // Ceiling panels are CEIL_W x CEIL_L = 0.5 x 1.0 m (x by z, world metres). Grid lines sit at world multiples of these, so the grid
@@ -123,9 +125,10 @@ function info(cx,cz){const id=cx+','+cz;let I=infoCache.get(id);if(I)return I;
   I={hc,vc,n,sp,kind,open:kind==='halls'||kind==='forest'||kind==='atrium',Hc:sp==='atrium'?6.6:H,pal,name};infoCache.set(id,I);return I}
 // Openings in the boundary on the north (dir 0, cells along x) or west (dir 1, cells along z) side of chunk cx,cz.
 // Depends only on the two chunks' info, so both sides always agree. Every boundary gets at least one opening -> the world stays connected.
-function edgeOpen(dir,cx,cz){const A=dir?info(cx-1,cz):info(cx,cz-1),C=info(cx,cz),r=rng(cx,cz,800+dir),open=new Uint8Array(N),flag=new Uint8Array(N);
+// rg (global room structure): a boundary between two non-open chunks is "soft" - no wall is forced; only corridor mouths are cut.
+function edgeOpen(dir,cx,cz,rg){const A=dir?info(cx-1,cz):info(cx,cz-1),C=info(cx,cz),r=rng(cx,cz,800+dir),open=new Uint8Array(N),flag=new Uint8Array(N),soft=!!rg&&!(A.open||C.open);
   const cut=(a,b,l)=>{a=Math.max(0,a);b=Math.min(N,b);for(let i=a;i<b;i++){open[i]=1;if(l)flag[i]=1}};
-  if(A.open&&C.open){if(r()<.8)cut(0,N);else for(let i=0;i<3;i++){const w=3+Math.floor(r()*4),a=Math.floor(r()*(N-w));cut(a,a+w)}}
+  if(soft){}else if(A.open&&C.open){if(r()<.8)cut(0,N);else for(let i=0;i<3;i++){const w=3+Math.floor(r()*4),a=Math.floor(r()*(N-w));cut(a,a+w)}}
   else{const x=r(),tight=A.kind==='maze'||C.kind==='maze'||A.kind==='closets'||C.kind==='closets';
     if(x<.05)cut(0,N); // breach: the whole wall is simply missing
     else if(x<.15){const w=5+Math.floor(r()*7),a=1+Math.floor(r()*(N-w-1));cut(a,a+w)} // wide gap
@@ -133,10 +136,18 @@ function edgeOpen(dir,cx,cz){const A=dir?info(cx-1,cz):info(cx,cz-1),C=info(cx,c
   const ca=dir?A.hc:A.vc,cc=dir?C.hc:C.vc; // corridors run straight through; a corridor end is sometimes a dead end
   if(ca&&cc){cut(ca.o,ca.o+ca.w);cut(cc.o,cc.o+cc.w)}else if((ca||cc)&&r()<.6){const c=ca||cc;cut(c.o,c.o+c.w)}
   const lint=[];for(let i=0;i<N;){if(!open[i]){i++;continue}let j=i,f=0;while(j<N&&open[j])f|=flag[j++];if(f&&j-i<=3)lint.push([i,j]);i=j}
-  return {open,lint,h:Math.max(A.Hc,C.Hc)}}
+  return {open,lint,h:Math.max(A.Hc,C.Hc),soft}}
 // Full cell layout of a chunk. Walls live on cell edges: hw[z*N+x] = edge on line z (along x), vw[x*N+z] = edge on line x (along z).
 // Values: 0 open, 1 wall, 2 wall with a window cut-out (see-through, not passable).
-function layout(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L)return L;
+// Pillars and the odd free-standing wall of an open chunk (halls, forest, atrium). Writes into the chunk's own hw/vw/pillars.
+function openFeatures(I,cx,cz,r,hw,vw,pillars){
+    if(I.kind==='forest'){for(let i=0;i<8;i++)for(let j=0;j<8;j++)if(hash(cx*8+i,cz*8+j,640)>.12)pillars.push([.5+2*i,.5+2*j,.36])}
+    else if(I.kind==='atrium'){for(const [x,z] of [[4,4],[12,4],[4,12],[12,12]])pillars.push([x,z,1.1])}
+    else{if(hash(Math.floor(cx/2),Math.floor(cz/2),600)<.6)for(let i=0;i<4;i++)for(let j=0;j<4;j++)pillars.push([3.5+4*i,3.5+4*j,.62]);
+      // the odd free-standing wall in an open hall
+      for(let n=r()<.45?1+Math.floor(r()*2):0;n>0;n--){const ax=r()<.5?0:1,line=2+4*Math.floor(r()*4),a=2+Math.floor(r()*6),b=Math.min(N-2,a+3+Math.floor(r()*4));
+        for(let i=a;i<b;i++)(ax?vw:hw)[line*N+i]=1}}}
+function layoutLegacy(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L)return L;
   const I=info(cx,cz),r=rng(cx,cz,77),lab=new Int16Array(N*N),hw=new Uint8Array((N+1)*N),vw=new Uint8Array((N+1)*N),lint=[],pillars=[],rects=[];
   const E=[edgeOpen(0,cx,cz),edgeOpen(1,cx,cz),edgeOpen(0,cx,cz+1),edgeOpen(1,cx+1,cz)];
   // Narrow boundary openings must never be split by an interior wall.
@@ -152,12 +163,7 @@ function layout(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L)return 
     let ax=w>h?0:h>w?1:r()<.5?0:1;if(r()<.2)ax^=1;let k=pick(ax);if(k===null){ax^=1;k=pick(ax)}if(k===null)return leaf();
     if(ax===0){bsp(x0,z0,k,z1);bsp(k,z0,x1,z1);conns.push([1,k,z0,z1])}else{bsp(x0,z0,x1,k);bsp(x0,k,x1,z1);conns.push([0,k,x0,x1])}}
   if(I.open){fill(0,0,N,N,0);
-    if(I.kind==='forest'){for(let i=0;i<8;i++)for(let j=0;j<8;j++)if(hash(cx*8+i,cz*8+j,640)>.12)pillars.push([.5+2*i,.5+2*j,.36])}
-    else if(I.kind==='atrium'){for(const [x,z] of [[4,4],[12,4],[4,12],[12,12]])pillars.push([x,z,1.1])}
-    else{if(hash(Math.floor(cx/2),Math.floor(cz/2),600)<.6)for(let i=0;i<4;i++)for(let j=0;j<4;j++)pillars.push([3.5+4*i,3.5+4*j,.62]);
-      // the odd free-standing wall in an open hall
-      for(let n=r()<.45?1+Math.floor(r()*2):0;n>0;n--){const ax=r()<.5?0:1,line=2+4*Math.floor(r()*4),a=2+Math.floor(r()*6),b=Math.min(N-2,a+3+Math.floor(r()*4));
-        for(let i=a;i<b;i++)(ax?vw:hw)[line*N+i]=1}}}
+    openFeatures(I,cx,cz,r,hw,vw,pillars)}
   else{const hc=I.hc,vc=I.vc;if(hc)fill(0,hc.o,N,hc.o+hc.w,0);if(vc)fill(vc.o,0,vc.o+vc.w,N,0);
     const xs=vc?[[0,vc.o],[vc.o+vc.w,N]]:[[0,N]],zs=hc?[[0,hc.o],[hc.o+hc.w,N]]:[[0,N]];
     for(const [x0,x1] of xs)for(const [z0,z1] of zs){bsp(x0,z0,x1,z1); // each block is linked to the corridor(s) beside it
@@ -189,6 +195,108 @@ function layout(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L)return 
     let k=.5,c=0xfffaec;if(I.sp==='dark'?h<.9:(h<.07||roomOff.get(g))){k=0;c=0x76756a}else if(I.sp==='dark'||h<.16){k=.12;c=0xb4b2a2}
     lights.push({x:cx*N+lx+.25,y:I.Hc-.05,z:cz*N+lz+.5,k,c})}
   L={I,E,hw,vw,lint,pillars,lights};layoutCache.set(id,L);return L}
+// ===== Global room structure (default) =====
+// Rooms are generated per REGION (RS x RS cells = 3 x 3 chunks, 48 m) instead of per chunk, so a room, wall or corridor can
+// cross chunk borders freely and chunk borders carry no wall of their own. Region columns are staggered per region row (brick
+// bond) so the region borders do not line up either, and a region border is only ~half wall. Everything is a pure function of
+// the region coordinates, so any chunk can be rebuilt on its own and neighbours always agree.
+//  1. BSP over the region. Leaf size follows the zone of the chunks the rect covers (smallest-room zone wins). Splits prefer the
+//     4 m structural grid (the ceiling-panel grid) and occasionally land 1-3 m off it; big rects are split near their middle.
+//  2. Open chunks (halls, forest, atrium) and corridor strips are stamped over the rooms (label 0).
+//  3. Connected parts of one label become rooms; slivers (< 8 m2 or < 2 m wide) are merged into their longest neighbour.
+//  4. Walls = room borders. Doors: a random spanning tree over the room-adjacency graph (so every room is reachable) plus a few
+//     extra doors (loops). Then the odd missing wall, interior window, wide breach in a very long wall, and free-standing partition.
+const RS=48,regCache=new Map(),xoff=rz=>N*Math.floor(hash(rz,0,900)*(RS/N));
+const regionAt=(cx,cz)=>{const rz=Math.floor(cz*N/RS);return [Math.floor((cx*N-xoff(rz))/RS),rz]};
+const roomParams=I=>I.kind==='maze'?{m:2,g:2,T:7,big:.04,extra:.18}:I.kind==='closets'?{m:2,g:2,T:5,big:0,extra:.5}:{m:3,g:4,T:18+Math.max(0,.68-I.n)/.36*52,big:.12,extra:.3};
+function region(rx,rz){const id=rx+','+rz;let R=regCache.get(id);if(R)return R;
+  const S=RS,ox=rx*S+xoff(rz),oz=rz*S,r=rng(rx,rz,1000),lab=new Int16Array(S*S),cinfo=(x,z)=>info(Math.floor((ox+x)/N),Math.floor((oz+z)/N));
+  const rects=[];let nid=1;
+  function par(x0,z0,x1,z1){let T=1e9,m=9,g=4,any=false;
+    for(let cz=Math.floor((oz+z0)/N);cz<=Math.floor((oz+z1-1)/N);cz++)for(let cx=Math.floor((ox+x0)/N);cx<=Math.floor((ox+x1-1)/N);cx++){const I=info(cx,cz);if(I.open)continue;any=true;const p=roomParams(I);T=Math.min(T,p.T);m=Math.min(m,p.m);g=Math.min(g,p.g)}
+    const c=roomParams(cinfo((x0+x1)>>1,(z0+z1)>>1));return any?{T,m,g,big:c.big}:c}
+  function bsp(x0,z0,x1,z1){const w=x1-x0,h=z1-z0,a=w*h,P=par(x0,z0,x1,z1),leaf=()=>{for(let z=z0;z<z1;z++)for(let x=x0;x<x1;x++)lab[z*S+x]=nid;rects.push([x0,z0,x1,z1,nid++])};
+    if(a<=P.T*(.55+r()*.9)||(a<P.T*3.5&&r()<P.big))return leaf();
+    const pick=ax=>{const L=ax?h:w,s0=ax?z0:x0,lo=s0+P.m,hi=s0+L-P.m;if(hi<lo)return null;
+      const q=L>=16?Math.round(L*.3):0,a0=Math.max(lo,s0+q),b0=Math.min(hi,s0+L-q),c=[];for(let k=a0;k<=b0;k++)c.push(k);if(!c.length)return null;
+      const on=c.filter(k=>k%P.g===0),pool=on.length&&r()>.22?on:c;return pool[Math.floor(r()*pool.length)]};
+    let ax=w>h?0:h>w?1:r()<.5?0:1;if(r()<.2)ax^=1;let k=pick(ax);if(k===null){ax^=1;k=pick(ax)}if(k===null)return leaf();
+    if(ax===0){bsp(x0,z0,k,z1);bsp(k,z0,x1,z1)}else{bsp(x0,z0,x1,k);bsp(x0,k,x1,z1)}}
+  bsp(0,0,S,S);
+  // open chunks and corridor strips are stamped over the rooms (label 0 = open space)
+  for(let j=0;j<S/N;j++)for(let i=0;i<S/N;i++){const I=info(ox/N+i,oz/N+j),fill=(a,b,c,d)=>{for(let z=b;z<d;z++)for(let x=a;x<c;x++)lab[(j*N+z)*S+i*N+x]=0};
+    if(I.open)fill(0,0,N,N);else{if(I.hc)fill(0,I.hc.o,N,I.hc.o+I.hc.w);if(I.vc)fill(I.vc.o,0,I.vc.o+I.vc.w,N)}}
+  // rooms = connected parts of one label
+  function parts(){const comp=new Int32Array(S*S).fill(-1),area=[],bb=[],lv=[],cells=[],st=[];let n=0;
+    for(let s=0;s<S*S;s++){if(comp[s]>=0)continue;const cl=[],b=[S,S,0,0];comp[s]=n;st.push(s);
+      while(st.length){const p=st.pop(),x=p%S,z=(p-x)/S;cl.push(p);if(x<b[0])b[0]=x;if(z<b[1])b[1]=z;if(x+1>b[2])b[2]=x+1;if(z+1>b[3])b[3]=z+1;
+        for(const q of [x>0?p-1:-1,x<S-1?p+1:-1,z>0?p-S:-1,z<S-1?p+S:-1])if(q>=0&&comp[q]<0&&lab[q]===lab[s]){comp[q]=n;st.push(q)}}
+      area.push(cl.length);bb.push(b);lv.push(lab[s]);cells.push(cl);n++}
+    return {comp,n,area,bb,lv,cells}}
+  function mergeSlivers(C){let ch=false;
+    for(let c=0;c<C.n;c++){const b=C.bb[c];if(C.lv[c]===0||(C.area[c]>=8&&Math.min(b[2]-b[0],b[3]-b[1])>=2))continue;
+      const cnt=new Map();for(const p of C.cells[c]){const x=p%S;for(const q of [x>0?p-1:-1,x<S-1?p+1:-1,p>=S?p-S:-1,p<S*S-S?p+S:-1])if(q>=0&&C.comp[q]!==c)cnt.set(C.comp[q],(cnt.get(C.comp[q])||0)+1)}
+      let best=-1,bn=0;for(const [k,v] of cnt)if(v>bn||(v===bn&&k<best)){best=k;bn=v}
+      if(best>=0){for(const p of C.cells[c])lab[p]=C.lv[best];ch=true}}
+    return ch}
+  let C,guard=0;do{C=parts()}while(mergeSlivers(C)&&++guard<4);if(guard)C=parts();
+  const cm=C.comp,cobst=C.lv.map(v=>v===0);
+  // walls = borders between rooms; the north/west border of the region is about half open
+  const hw=new Uint8Array((S+1)*S),vw=new Uint8Array((S+1)*S),lint=[];
+  for(let z=1;z<S;z++)for(let x=0;x<S;x++)hw[z*S+x]=cm[(z-1)*S+x]!==cm[z*S+x]?1:0;
+  for(let x=1;x<S;x++)for(let z=0;z<S;z++)vw[x*S+z]=cm[z*S+x-1]!==cm[z*S+x]?1:0;
+  const edge=d=>{const e=rng(rx,rz,1100+d),o=new Uint8Array(S);let pos=0,op=e()<.5;while(pos<S){const len=3+Math.floor(e()*(op?7:8)),end=Math.min(S,pos+len);if(op)for(let i=pos;i<end;i++)o[i]=1;pos=end;op=!op}
+    if(!o.some(v=>v))for(let i=9;i<13;i++)o[i]=1;return o};
+  {const a=edge(0),b=edge(1);for(let i=0;i<S;i++){hw[i]=a[i]^1;vw[i]=b[i]^1}}
+  const scan=()=>{const out=[];for(let ax=0;ax<2;ax++){const arr=ax?vw:hw;for(let line=1;line<S;line++){let cur=null;
+      for(let i=0;i<S;i++){const p=ax?cm[i*S+line-1]:cm[(line-1)*S+i],q=ax?cm[i*S+line]:cm[line*S+i],key=p<q?p+'|'+q:q+'|'+p;
+        if(arr[line*S+i]===1&&p!==q){if(cur&&cur.key===key&&cur.b===i)cur.b++;else out.push(cur={ax,line,a:i,b:i+1,key,p,q})}else cur=null}}}return out};
+  const door=q=>{const arr=q.ax?vw:hw,len=q.b-q.a,w=Math.min(len,r()<.3?3:2),s=q.a+Math.floor(r()*(len-w+1));
+    for(let i=s;i<s+w;i++)arr[q.line*S+i]=0;if(r()<.65)lint.push([q.ax,q.line,s,s+w])};
+  const at=q=>{const m=(q.a+q.b)>>1;return q.ax?cinfo(q.line,m):cinfo(m,q.line)};
+  {const runs=scan(),pm=new Map();for(const q of runs){let e=pm.get(q.key);if(!e)pm.set(q.key,e={p:q.p,q:q.q,runs:[]});e.runs.push(q)}
+    const pairs=[...pm.values()];for(let i=pairs.length-1;i>0;i--){const j=Math.floor(r()*(i+1)),t=pairs[i];pairs[i]=pairs[j];pairs[j]=t}
+    const up=new Int32Array(C.n).map((_,i)=>i),find=a=>{while(up[a]!==a)a=up[a]=up[up[a]];return a};
+    // A door is at least 2 cells wide (a 1-cell gap between two 0.3 m wall ends is only 0.7 m clear, less than the player's 0.74 m).
+    // Rooms that touch only along 1-cell stretches are, if need be, joined by opening that whole border (done last).
+    const narrow=[];
+    for(const e of pairs){const long=e.runs.filter(q=>q.b-q.a>=2),a=find(e.p),b=find(e.q);
+      if(!long.length){narrow.push(e);continue}
+      if(a!==b){up[a]=b;door(long[Math.floor(r()*long.length)])}
+      else{const q=long[Math.floor(r()*long.length)];if(r()<roomParams(at(q)).extra*1.6)door(q)}}
+    for(const e of narrow){const a=find(e.p),b=find(e.q);if(a===b)continue;up[a]=b;for(const q of e.runs){const arr=q.ax?vw:hw;for(let i=q.a;i<q.b;i++)arr[q.line*S+i]=0}}}
+  // the odd unexpected opening
+  for(const q of scan()){const len=q.b-q.a;if(len<2)continue;const arr=q.ax?vw:hw,x=r(),maze=at(q).kind==='maze';
+    if(x<.04&&!maze&&len<=8){for(let i=q.a;i<q.b;i++)arr[q.line*S+i]=0}
+    else if(x<.11&&len>=3){const w=len>=4&&r()<.5?3:2,s=q.a+Math.floor(r()*(len-w+1));for(let i=s;i<s+w;i++)arr[q.line*S+i]=2}
+    else if(len>=12&&r()<.35){const g=4+Math.floor(r()*Math.min(6,len-7)),s=q.a+2+Math.floor(r()*(len-g-3));for(let i=s;i<s+g;i++)arr[q.line*S+i]=0}}
+  // large rooms sometimes get a free-standing partition, at least two cells clear of every wall
+  for(const [x0,z0,x1,z1] of rects)if(x1-x0>=7&&z1-z0>=7&&r()<.3){const c0=cm[z0*S+x0];let same=true;
+    for(let z=z0;z<z1&&same;z++)for(let x=x0;x<x1;x++)if(cm[z*S+x]!==c0){same=false;break}
+    const vert=r()<.5,ln=vert?x0+3+Math.floor(r()*(x1-x0-5)):z0+3+Math.floor(r()*(z1-z0-5));
+    if(same){if(vert){for(let z=z0+2;z<z1-2;z++)vw[ln*S+z]=1}else for(let x=x0+2;x<x1-2;x++)hw[ln*S+x]=1}}
+  R={ox,oz,hw,vw,cm,cobst,lint};regCache.set(id,R);return R}
+function layoutNew(cx,cz){const I=info(cx,cz),[rx,rz]=regionAt(cx,cz),R=region(rx,rz),S=RS,lx0=cx*N-R.ox,lz0=cz*N-R.oz,
+    hw=new Uint8Array((N+1)*N),vw=new Uint8Array((N+1)*N),lab=new Int16Array(N*N),pillars=[],lint=[],
+    E=[edgeOpen(0,cx,cz,1),edgeOpen(1,cx,cz,1),edgeOpen(0,cx,cz+1,1),edgeOpen(1,cx+1,cz,1)];
+  for(let a=0;a<N;a++)for(let b=0;b<N;b++){hw[a*N+b]=R.hw[(lz0+a)*S+lx0+b];vw[a*N+b]=R.vw[(lx0+a)*S+lz0+b];lab[a*N+b]=R.cm[(lz0+a)*S+lx0+b]}
+  // chunk borders never add walls except between two open chunks (as before: a hall edge is sometimes walled with gaps). Everywhere else
+  // the room walls stay as they are and the border only gains openings (corridor mouths, gaps towards open chunks).
+  for(let d=0;d<2;d++){const arr=d?vw:hw,e=E[d],walled=!e.soft&&I.open&&(d?info(cx-1,cz):info(cx,cz-1)).open;for(let i=0;i<N;i++){if(e.open[i])arr[i]=0;else if(walled)arr[i]=1}}
+  // a narrow opening in a hard border must never be split by a wall running into it from the room side
+  [[0,hw,vw,0,1],[1,vw,hw,0,1],[2,hw,vw,N-1,0],[3,vw,hw,N-1,0]].forEach(([k,,perp,row,stride])=>{const e=E[k];if(e.soft)return;
+    for(let i=0;i<N;){if(!e.open[i]){i++;continue}let j=i;while(j<N&&e.open[j])j++;if(j-i<=4)for(let t=i+1;t<j;t++)perp[t*N+row]=0;i=j}});
+  if(I.open)openFeatures(I,cx,cz,rng(cx,cz,77),hw,vw,pillars);
+  // doors of this region that touch this chunk (a door may straddle a chunk border), minus cells that a hard border has walled up again
+  for(const [ax,line,a,b] of R.lint){const l=ax?line-lx0:line-lz0,o=ax?lz0:lx0;if(l<0||l>=N)continue;const arr=ax?vw:hw;
+    for(let i=Math.max(a,o);i<Math.min(b,o+N);){if(arr[l*N+i-o]){i++;continue}let j=i;while(j<Math.min(b,o+N)&&!arr[l*N+j-o])j++;lint.push([ax,l,i-o,j-o]);i=j}}
+  const lights=[],roomOff=new Map();
+  for(let i=0;i<4;i++)for(let j=0;j<4;j++){const lx=1+4*i,lz=1+4*j,c=lab[lz*N+lx],h=hash(cx*4+i,cz*4+j,620),ob=R.cobst[c],key=ob?0:c;
+    if(!roomOff.has(key))roomOff.set(key,hash(ob?cx*64:rx*5003+c,ob?cz:rz+777,610)<.07);
+    let k=.5,col=0xfffaec;if(I.sp==='dark'?h<.9:(h<.07||roomOff.get(key))){k=0;col=0x76756a}else if(I.sp==='dark'||h<.16){k=.12;col=0xb4b2a2}
+    lights.push({x:cx*N+lx+.25,y:I.Hc-.05,z:cz*N+lz+.5,k,c:col})}
+  return {I,E,hw,vw,lint,pillars,lights}}
+function layout(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L)return L;L=GEN_LEGACY?layoutLegacy(cx,cz):layoutNew(cx,cz);layoutCache.set(id,L);return L}
 // --- GEN END
 // Shared materials: Lambert + vertex colours is far cheaper than Standard; "glow" panels ignore lighting.
 // Procedural canvas textures (no asset files). Kept near-white so the palette colours (vertex colours) tint them.
@@ -250,7 +358,8 @@ function slab(B,x,z,w,d,y0,y1,color){const lo=Math.min(y1,H);if(lo>y0+.001)B.box
   if(y1>H+.001){const a=Math.max(y0,H),vs=.86/(y1-H);B.box(x,(a+y1)/2,z,w,y1-a,d,color,false,'wall',vs,.12-H*vs)}}
 // A straight run of wall cells on grid line "line" (ax 0: along x at z=line, ax 1: along z at x=line), cells a..b.
 // Split into ~2 m pieces so the baked light pools have enough vertices; one collision box per run.
-function wallRun(B,ax,line,a,b,h,v,color,ox,oz){const t=.3,s=a-t/2,e=b+t/2,n=Math.max(1,Math.round((e-s)/2)),st=(e-s)/n;
+// ea/eb: extend the run by half a wall thickness at its start/end (corner fill). Off where the wall continues into the neighbouring chunk, so the two runs abut exactly instead of overlapping.
+function wallRun(B,ax,line,a,b,h,v,color,ox,oz,ea=true,eb=true){const t=.3,s=a-(ea?t/2:0),e=b+(eb?t/2:0),n=Math.max(1,Math.round((e-s)/2)),st=(e-s)/n;
   for(let i=0;i<n;i++){const m=s+st*(i+.5),x=ax?ox+line:ox+m,z=ax?oz+m:oz+line,w=ax?t:st,d=ax?st:t;
     if(v===2){slab(B,x,z,w,d,0,1.05,color);slab(B,x,z,w,d,2.05,h,color)}else slab(B,x,z,w,d,0,h,color)}
   const m=(s+e)/2;B.walls.push(ax?{x:ox+line,z:oz+m,w:t,d:e-s}:{x:ox+m,z:oz+line,w:e-s,d:t})}
@@ -260,8 +369,10 @@ function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const L=lay
   const B=new Builder(lights,I.sp==='dark'?LIGHT.dark:1);
   for(let i=0;i<8;i++)for(let j=0;j<8;j++){B.box(ox+1+2*i,-.18,oz+1+2*j,2,.36,2,p.floor,false,'floor');B.box(ox+1+2*i,Hc+.18,oz+1+2*j,2,.36,2,p.ceil,false,'ceil')}
   // Walls on the lines this chunk owns: its north/west boundary (line 0) and every interior line. South/east belong to the neighbours.
-  for(let ax=0;ax<2;ax++){const arr=ax?L.vw:L.hw;for(let line=0;line<N;line++){const h=line?Hc:L.E[ax].h;
-    for(let i=0;i<N;){const v=arr[line*N+i];if(!v){i++;continue}let j=i;while(j<N&&arr[line*N+j]===v)j++;wallRun(B,ax,line,i,j,h,v,wall,ox,oz);i=j}}}
+  for(let ax=0;ax<2;ax++){const arr=ax?L.vw:L.hw,pa=GEN_LEGACY?null:(ax?layout(cx,cz-1).vw:layout(cx-1,cz).hw),na=GEN_LEGACY?null:(ax?layout(cx,cz+1).vw:layout(cx+1,cz).hw);
+    for(let line=0;line<N;line++){const h=line?Hc:L.E[ax].h;
+    for(let i=0;i<N;){const v=arr[line*N+i];if(!v){i++;continue}let j=i;while(j<N&&arr[line*N+j]===v)j++;
+      wallRun(B,ax,line,i,j,h,v,wall,ox,oz,!(pa&&i===0&&pa[line*N+N-1]),!(na&&j===N&&na[line*N]));i=j}}}
   // Lintels over door-sized openings, so they read as doorways instead of gaps.
   const lint=[...L.lint,...L.E[0].lint.map(([a,b])=>[0,0,a,b]),...L.E[1].lint.map(([a,b])=>[1,0,a,b])];
   for(const [ax,line,a,b] of lint){const h=line?Hc:L.E[ax].h,m=(a+b)/2,l=b-a;
@@ -285,8 +396,26 @@ if(cx!==lastCx||cz!==lastCz){lastCx=cx;lastCz=cz;queue=[];
   for(const [id,g] of [...chunks]){const [x,z]=id.split(',').map(Number);if(Math.abs(x-cx)>range+1||Math.abs(z-cz)>range+1)removeChunk(id,g)}
   // layouts of far-away chunks are cheap to regenerate, so drop them
   for(const c of [layoutCache,infoCache])for(const id of c.keys()){const [x,z]=id.split(',').map(Number);if(Math.abs(x-cx)>range+4||Math.abs(z-cz)>range+4)c.delete(id)}
+  for(const id of regCache.keys()){const [x,z]=id.split(',').map(Number);if(Math.abs((x*RS+xoff(z)+RS/2)/N-cx)>range+6||Math.abs((z*RS+RS/2)/N-cz)>range+6)regCache.delete(id)}
   statusEl.textContent=`SECTOR ${cx},${cz} · ${info(cx,cz).name}`}
 for(let n=0;n<2&&queue.length;n++){const [x,z]=queue.pop();addChunk(x,z)}}
+// Debug (?debug=map): top-down map of the 7 x 7 chunks around the player (walls dark, windows blue, pillars green, ceiling panels
+// yellow, chunk borders dashed red) for judging the generator without walking around. Does nothing without the parameter.
+const DBG_MAP=new URLSearchParams(location.search).get('debug')==='map';let mapCtx=null,mapAt=0;
+function drawMap(now){if(now-mapAt<250)return;mapAt=now;
+  if(!mapCtx){const c=document.createElement('canvas');c.width=c.height=336;c.style.cssText='position:fixed;left:8px;bottom:8px;z-index:20;pointer-events:none;border:1px solid #000;opacity:.92';document.body.appendChild(c);mapCtx=c.getContext('2d')}
+  const g=mapCtx,sc=336/(7*N),cx=Math.floor(camera.position.x/tile),cz=Math.floor(camera.position.z/tile),x0=(cx-3)*N,z0=(cz-3)*N;
+  g.fillStyle='#f4f1e6';g.fillRect(0,0,336,336);
+  const seg=(x1,z1,x2,z2)=>{g.beginPath();g.moveTo(x1*sc,z1*sc);g.lineTo(x2*sc,z2*sc);g.stroke()};
+  for(let a=0;a<7;a++)for(let b=0;b<7;b++){const L=layout(cx-3+a,cz-3+b),ox=a*N,oz=b*N;
+    g.fillStyle=L.I.sp==='red'?'#e8b8b0':L.I.open?'#faf8ee':L.I.kind==='maze'?'#ebe6d2':'#f4f1e6';g.fillRect(ox*sc,oz*sc,N*sc,N*sc);
+    g.fillStyle='#e8c860';for(const l of L.lights)if(l.k>0)g.fillRect((l.x-x0-.25)*sc,(l.z-z0-.5)*sc,.5*sc,sc);
+    g.fillStyle='#7a2';for(const [x,z,s] of L.pillars)g.fillRect((ox+x-s/2)*sc,(oz+z-s/2)*sc,s*sc,s*sc);
+    for(let ax=0;ax<2;ax++){const arr=ax?L.vw:L.hw;for(let line=0;line<N;line++)for(let i=0;i<N;i++){const v=arr[line*N+i];if(!v)continue;g.strokeStyle=v===2?'#6aa0c8':'#2a2a22';g.lineWidth=v===2?1:1.6;
+      if(ax)seg(ox+line,oz+i,ox+line,oz+i+1);else seg(ox+i,oz+line,ox+i+1,oz+line)}}}
+  g.strokeStyle='rgba(200,40,40,.45)';g.lineWidth=1;g.setLineDash([3,3]);for(let k=0;k<=7;k++){seg(k*N,0,k*N,7*N);seg(0,k*N,7*N,k*N)}g.setLineDash([]);
+  const px=(camera.position.x-x0)*sc,pz=(camera.position.z-z0)*sc,yaw=look.yaw;g.fillStyle='#d00';g.beginPath();g.arc(px,pz,4,0,6.2832);g.fill();
+  g.strokeStyle='#d00';g.lineWidth=2;g.beginPath();g.moveTo(px,pz);g.lineTo(px-Math.sin(yaw)*14,pz-Math.cos(yaw)*14);g.stroke()}
 /* ---- AUDIO: lysstofrør-brummen, drømmende ekko-skridt, vejrtrækning ---- */
 let hum,AUD=null,stepN=null,masterGain=null;
 function startHum(){if(hum){if(hum.state==='suspended')hum.resume();return}
@@ -364,6 +493,6 @@ function handheld(now,dt,moving,running){const t=now/1000;moveAmt+=((moving?1:0)
   camera.rotation.set(view.pitch+sx+Math.cos(elapsed*2)*.009*moveAmt+Math.sin(t*37)*.012*jolt,view.yaw+sy+Math.cos(elapsed)*.008*moveAmt,roll+Math.sin(t*29)*.02*jolt,'YXZ');
   const f=settings.fov+(settings.bob?Math.sin(t*.4)*.8+Math.sin(t*1.3)*.4-runAmt*3-jolt*1.5:0);if(Math.abs(camera.fov-f)>.01){camera.fov=f;camera.updateProjectionMatrix()}
   vhsMat.uniforms.shake.value=jolt+runAmt*.5}
-let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?4.6:2.5)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(keys.has('ShiftLeft')||keys.has('ShiftRight')?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(keys.has('ShiftLeft')||keys.has('ShiftRight'))}else camera.position.y+=(1.7-camera.position.y)*.12}updateChunks();ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight'));handheld(now,dt,mv,mv&&(keys.has('ShiftLeft')||keys.has('ShiftRight')));breathe();
+let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));if(f||s){const len=Math.hypot(f,s),speed=(keys.has('ShiftLeft')||keys.has('ShiftRight')?4.6:2.5)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(keys.has('ShiftLeft')||keys.has('ShiftRight')?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(keys.has('ShiftLeft')||keys.has('ShiftRight'))}else camera.position.y+=(1.7-camera.position.y)*.12}updateChunks();if(DBG_MAP)drawMap(now);ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight'));handheld(now,dt,mv,mv&&(keys.has('ShiftLeft')||keys.has('ShiftRight')));breathe();
 vhsMat.uniforms.time.value=now/1000%1000;renderer.setRenderTarget(rt);renderer.render(scene,camera);renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();while(queue.length)updateChunks();{const [x,z]=findSpawn();camera.position.set(x,1.7,z)}requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
 </script></body></html>
