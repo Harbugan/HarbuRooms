@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "sounds": {
+    "footsteps": {
+      "files": [
+        "player/footstep_carpet_01.ogg",
+        "player/footstep_carpet_02.ogg",
+        "player/footstep_carpet_03.ogg"
+      ],
+      "gain": 1
+    },
+    "breathing_idle": {
+      "files": [
+        "player/breathing_idle.ogg"
+      ],
+      "gain": 1
+    },
+    "breathing_run": {
+      "files": [
+        "player/breathing_run.ogg"
+      ],
+      "gain": 1
+    },
+    "cough": {
+      "files": [
+        "player/cough.ogg"
+      ],
+      "gain": 1
+    }
+  }
+}
