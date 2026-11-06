@@ -419,7 +419,7 @@ function drawMap(now){if(now-mapAt<250)return;mapAt=now;
 /* ---- AUDIO: lysstofrør-brummen, drømmende ekko-skridt, vejrtrækning ---- */
 let hum,AUD=null,stepN=null,masterGain=null;
 let introDuck=1,lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
-const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100,introEnabled:1,introDuration:8,introFall:1,introShake:.35,introBreath:.25,introImpact:.5,introDuck:.6};
+const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100,introEnabled:1,introDuration:8,introFall:1,introShake:.35,introBreath:.25,introImpact:.5,introDuck:.6,envEnabled:1,envWear:8,envDamp:3,envCeil:2,envIntensity:25,envShow:0};
 let devSaved={};try{devSaved=JSON.parse(localStorage.getItem('nullrooms.dev')||'{}')||{}}catch(e){}
 const devValues={...DEV_DEFAULT,...devSaved};let devGains=null,devOpen=false;
 function devScale(k){return Math.max(0,Math.min(200,Number(devValues[k])||0))/100}
@@ -776,11 +776,27 @@ for(const [section,key,label,min,max] of devRegistry){
   row.append(cap,input,out);devControls.append(row)}
  const rb=document.createElement('button');rb.textContent='REPLAY INTRO';rb.onclick=()=>{if(!hasStarted){document.querySelector('#devStatus').textContent='Start the game first, then replay.';return}
   toggleDev(false);introStart(true)};devControls.append(rb)}
+// Environmental details (step 4A, docs/ENVIRONMENT.md): shader-only layer in the shared Level 0 materials, so every change is live (no chunk rebuild, player untouched).
+const ENV_CFG=[['envWear','Surface wear freq. (% of 2 m wall segments)',0,100,.5,1,'%'],['envDamp','Dampness freq. (% of 4x4 m floor cells)',0,100,.5,1,'%'],['envCeil','Ceiling discoloration freq. (% of 0.5x1 m panels)',0,100,.5,1,'%'],['envIntensity','Detail intensity',0,100,1,0,'%']];
+const envVal=k=>{const v=Number(devValues[k]);return Number.isFinite(v)?v:DEV_DEFAULT[k]};
+function applyEnv(){matSystem?.setEnvironment({enabled:Number(devValues.envEnabled)!==0,wear:envVal('envWear')/100,damp:envVal('envDamp')/100,ceil:envVal('envCeil')/100,intensity:envVal('envIntensity')/100,show:Number(devValues.envShow)===1})}
+{const h=document.createElement('h3');h.textContent='ENVIRONMENT';devControls.append(h);
+ const save=()=>{applyEnv();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}};
+ for(const [key,label] of [['envEnabled','Enable environmental details'],['envShow','Show detail placement (debug colours)']]){
+  const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';en.append(cb,' '+label);
+  cb.onchange=()=>{devValues[key]=cb.checked?1:0;save()};devSync.push(()=>{cb.checked=!!Number(devValues[key])});cb.checked=!!Number(devValues[key]);devControls.append(en)}
+ for(const [key,label,min,max,step,dec,suffix] of ENV_CFG){
+  const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output');
+  cap.textContent=label;input.type='range';input.min=min;input.max=max;input.step=step;
+  const sync=()=>{input.value=envVal(key);out.textContent=envVal(key).toFixed(dec)+suffix};devSync.push(sync);sync();
+  input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};
+  row.append(cap,input,out);devControls.append(row)}
+ applyEnv()}
 const devPadInvert=document.querySelector('#devPadInvert');devSync.push(()=>{devPadInvert.checked=!!settings.padInvertY});devPadInvert.onchange=()=>{settings.padInvertY=devPadInvert.checked;applySettings();document.getElementById('padInvertY').checked=settings.padInvertY};
 function devRefresh(){devSync.forEach(fn=>fn());document.querySelector('#devStatus').textContent='Audio: '+(AUD?.ctx.state||'not started')+' | '+['footsteps','breathing_idle','cough'].map(k=>k+': '+(audioBuffers[k]?.length?'file':'fallback')).join(' / ')}
 function toggleDev(open){devOpen=open;devPanel.hidden=!open;if(open){if(padMode)pauseGame(true);if(document.pointerLockElement===renderer.domElement)document.exitPointerLock();devRefresh()}else if(hasStarted&&overlay.style.display==='none')renderer.domElement.requestPointerLock().catch(()=>showMenu())}
 document.querySelector('#devClose').onclick=()=>toggleDev(false);
-document.querySelector('#devReset').onclick=()=>{Object.assign(devValues,DEV_DEFAULT);applyDevGains();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}devRefresh()};
+document.querySelector('#devReset').onclick=()=>{Object.assign(devValues,DEV_DEFAULT);applyDevGains();applyEnv();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}devRefresh()};
 document.querySelector('#devCopy').onclick=()=>{const data=JSON.stringify({audio:devValues,settings},null,2);navigator.clipboard?.writeText(data).catch(()=>console.info(data))};
 for(const button of devPanel.querySelectorAll('[data-sound]'))button.onclick=()=>{
  startHum();const t=AUD?.ctx.currentTime+.03;if(!AUD)return;
