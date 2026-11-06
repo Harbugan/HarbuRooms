@@ -1,0 +1,74 @@
+name: Preview HarbuRooms pull requests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Existing pull request number to preview"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: harburooms-preview-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: Upload isolated browser preview
+    # Never expose deployment credentials to code from forks.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve pull request commit
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR: ${{ github.event.pull_request.number }}
+          INPUT_PR: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          pr="${EVENT_PR:-${INPUT_PR:-}}"
+          [[ "$pr" =~ ^[0-9]+$ ]] || { echo "::error::Invalid PR number"; exit 1; }
+          details="$(gh api "repos/$REPOSITORY/pulls/$pr")"
+          head_repo="$(jq -r '.head.repo.full_name' <<< "$details")"
+          [[ "$head_repo" == "$REPOSITORY" ]] || { echo "::error::Fork previews are disabled"; exit 1; }
+          sha="$(jq -r '.head.sha' <<< "$details")"
+          [[ "$sha" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact PR commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          persist-credentials: false
+
+      - name: Verify site entry point
+        run: test -f index.html
+
+      - name: Upload preview over FTPS
+        env:
+          FTP_USER: ${{ secrets.NORDICWAY_FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.NORDICWAY_FTP_PASSWORD }}
+          PR_NUMBER: ${{ steps.target.outputs.pr }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FTP_USER" && test -n "$FTP_PASSWORD" || { echo "::error::Missing NordicWay FTP secrets"; exit 1; }
+          remote="ftp://cp17.nordicway.dk//public_html/Projects/HarbuRooms/preview/pr-$PR_NUMBER"
+          while IFS= read -r -d '' file; do
+            relative="${file#./}"
+            echo "Preview upload: $relative"
+            curl --fail --show-error --silent --retry 2 --ssl-reqd --ftp-pasv --ftp-create-dirs \
+              --user "$FTP_USER:$FTP_PASSWORD" --upload-file "$file" "$remote/$relative"
+          done < <(find . -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.svg' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.ico' -o -name '*.glb' -o -name '*.gltf' -o -name '*.bin' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) -not -path './.git/*' -not -path './.github/*' -print0)
+          echo "Preview: https://lilleoere.eu/Projects/HarbuRooms/preview/pr-$PR_NUMBER/" >> "$GITHUB_STEP_SUMMARY"
