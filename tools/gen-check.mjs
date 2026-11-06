@@ -61,11 +61,12 @@ function analyse(legacy){
     isolatedPct:+(inner.filter(r=>adj[r].size===0).length/inner.length*100).toFixed(1),
     avgDoors:+(inner.reduce((s,r)=>s+adj[r].size,0)/inner.length).toFixed(2)};
   out.doorsPerChunk=+(doors.length/((2*R+1)**2)).toFixed(1);
-  // lattice: wall coverage on chunk-boundary lines vs all other lines
-  let bw=0,bt=0,iw=0,it=0;for(let ax=0;ax<2;ax++){const Wa=ax?W1:W0;for(let line=0;line<=W;line++){const onB=((line+(ax?x0:z0))%N+N)%N===0;
-    for(let i=0;i<W;i++){if(onB){bt++;if(Wa[line*W+i])bw++}else{it++;if(Wa[line*W+i])iw++}}}}
-  out.latticeRatio=+((bw/bt)/(iw/it)).toFixed(2); // wall density on chunk lines / elsewhere; ~1 = chunk size invisible
-  out.wallCoverage={onChunkLines:+(bw/bt*100).toFixed(1)+'%',elsewhere:+(iw/it*100).toFixed(1)+'%'};
+  // lattice: wall coverage on chunk-boundary lines (multiples of 16 m) vs the other lines of the 4 m structural grid (4, 8, 12 m)
+  const cov=Array(N).fill(0),tt=Array(N).fill(0);
+  for(let ax=0;ax<2;ax++){const Wa=ax?W1:W0;for(let line=0;line<=W;line++){const m=(((line+(ax?x0:z0))%N)+N)%N;for(let i=0;i<W;i++){tt[m]++;if(Wa[line*W+i])cov[m]++}}}
+  const pc=m=>cov[m]/tt[m],g4=(pc(4)+pc(8)+pc(12))/3,oth=[1,2,3,5,6,7,9,10,11,13,14,15].reduce((s,m)=>s+pc(m),0)/12;
+  out.latticeRatio=+(pc(0)/g4).toFixed(2); // wall density on chunk lines / on other 4 m lines; ~1 = chunk size invisible
+  out.wallCoverage={chunkLines:+(pc(0)*100).toFixed(1)+'%',other4mLines:+(g4*100).toFixed(1)+'%',offGridLines:+(oth*100).toFixed(1)+'%'};
   // free wall ends: a run of wall whose end vertex touches no other wall edge (pillars ignored)
   let free=0,runs=0;
   const wl=(ax,line,i)=>{if(line<0||line>W||i<0||i>=W)return 0;return (ax?W1:W0)[line*W+i]};
@@ -77,7 +78,7 @@ function analyse(legacy){
       if(g>=1&&g<=3&&k>=0&&k<W&&wl(ax,line,k))continue;free++}i=j}
   out.freeWallEndsPerChunk=+(free/((2*R+1)**2)).toFixed(2);out.wallRunsPerChunk=+(runs/((2*R+1)**2)).toFixed(1);
   // playability: flood fill on a 0.25 m grid with the game's collision rule (half extent .37), from the spawn search of findSpawn()
-  const boxes=[];for(let cz=-R;cz<=R+1;cz++)for(let cx=-R;cx<=R+1;cx++)boxes.push(...chunkBoxes(G,cx,cz));
+  const boxes=[];for(let cz=-R;cz<=R+1;cz++)for(let cx=-R;cx<=R+1;cx++)boxes.push(...chunkBoxes(G,cx,cz,legacy));
   const BK=4,bk=new Map();for(const b of boxes){const hx=b.w/2+.37,hz=b.d/2+.37;
     for(let kx=Math.floor((b.x-hx)/BK);kx<=Math.floor((b.x+hx)/BK);kx++)for(let kz=Math.floor((b.z-hz)/BK);kz<=Math.floor((b.z+hz)/BK);kz++){const k=kx+','+kz;(bk.get(k)||bk.set(k,[]).get(k)).push(b)}}
   const hit=(x,z)=>{const l=bk.get(Math.floor(x/BK)+','+Math.floor(z/BK));if(!l)return false;for(const b of l)if(Math.abs(x-b.x)<b.w/2+.37&&Math.abs(z-b.z)<b.d/2+.37)return true;return false};
@@ -85,12 +86,12 @@ function analyse(legacy){
   const S=.25,M=Math.round(W/S),free2=new Uint8Array(M*M);let nfree=0;
   for(let j=0;j<M;j++)for(let i=0;i<M;i++){if(!hit(x0+(i+.5)*S,z0+(j+.5)*S)){free2[j*M+i]=1;nfree++}}
   const seen=new Uint8Array(M*M),q=[];const si=Math.floor((sp[0]-x0)/S),sj=Math.floor((sp[1]-z0)/S);
-  const flood=(s,mark)=>{let c=0;q.length=0;q.push(s);seen[s]=mark;let b=0;while(q.length){const p=q.pop(),i=p%M,j=(p-i)/M;c++;if(i===0||j===0||i===M-1||j===M-1)b=1;
-      for(const n of [i>0?p-1:-1,i<M-1?p+1:-1,j>0?p-M:-1,j<M-1?p+M:-1])if(n>=0&&free2[n]&&!seen[n]){seen[n]=mark;q.push(n)}}return [c,b]};
+  const flood=(s,mark)=>{let c=0,sx=0,sz=0;q.length=0;q.push(s);seen[s]=mark;let b=0;while(q.length){const p=q.pop(),i=p%M,j=(p-i)/M;c++;sx+=i;sz+=j;if(i===0||j===0||i===M-1||j===M-1)b=1;
+      for(const n of [i>0?p-1:-1,i<M-1?p+1:-1,j>0?p-M:-1,j<M-1?p+M:-1])if(n>=0&&free2[n]&&!seen[n]){seen[n]=mark;q.push(n)}}return [c,b,x0+sx/c*S,z0+sz/c*S]};
   const [reach]=flood(sj*M+si,1);let pockets=[];
-  for(let s=0;s<M*M;s++)if(free2[s]&&!seen[s]){const [c,b]=flood(s,2);if(c*S*S>=2)pockets.push({m2:+(c*S*S).toFixed(1),touchesBorder:!!b})}
+  for(let s=0;s<M*M;s++)if(free2[s]&&!seen[s]){const [c,b,px,pz]=flood(s,2);if(c*S*S>=2)pockets.push({m2:+(c*S*S).toFixed(1),touchesBorder:!!b,at:[+px.toFixed(1),+pz.toFixed(1)]})}
   out.playability={reachableM2:+(reach*S*S).toFixed(0),unreachablePockets:pockets.length,unreachableM2:+pockets.reduce((s,p)=>s+p.m2,0).toFixed(1),
-    pocketsNotAtBorder:pockets.filter(p=>!p.touchesBorder).length,largest:pockets.sort((a,b)=>b.m2-a.m2).slice(0,3)};
+    pocketsNotAtBorder:pockets.filter(p=>!p.touchesBorder).length,largest:pockets.sort((a,b)=>b.m2-a.m2).slice(0,opt('pockets')?99:3)};
   return out}
 
 const modes=opt('compare')?[true,false]:[opt('legacy')];const res={};

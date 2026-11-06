@@ -5,7 +5,7 @@ import {writeFileSync} from 'node:fs';
 import {loadGen} from './gen-lib.mjs';
 
 const argv=process.argv.slice(2),out=argv[0],opt=n=>argv.includes('--'+n),val=(n,d)=>{const i=argv.indexOf('--'+n);return i>=0?+argv[i+1]:d};
-if(!out||out.startsWith('--')){console.error('usage: gen-map.mjs out.svg [--cx n --cz n --radius n --legacy --scale px_per_m --no-grid]');process.exit(1)}
+if(!out||out.startsWith('--')){console.error('usage: gen-map.mjs out.svg [--cx n --cz n --radius n --legacy --scale px_per_m --no-grid --mark x,z]');process.exit(1)}
 const G=loadGen({legacy:opt('legacy')}),N=G.N,cx0=val('cx',0),cz0=val('cz',0),R=val('radius',4),S=val('scale',4);
 const x0=(cx0-R)*N,z0=(cz0-R)*N,Wm=(2*R+1)*N,P=v=>((v)*S).toFixed(1);
 let svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${Wm*S}" height="${Wm*S}" viewBox="0 0 ${Wm*S} ${Wm*S}"><rect width="100%" height="100%" fill="#f4f1e6"/>`;
@@ -23,4 +23,5 @@ if(!opt('no-grid'))for(let k=0;k<=2*R+1;k++){svg+=`<line x1="${P(k*N)}" y1="0" x
 const ln=(a,w,c)=>a.map(s=>`<line x1="${P(s[0])}" y1="${P(s[1])}" x2="${P(s[2])}" y2="${P(s[3])}" stroke="${c}" stroke-width="${w}" stroke-linecap="square"/>`).join('');
 svg+=ln(winLines,S*.2,'#6aa0c8')+ln(wallLines,S*.3,'#2a2a22');
 for(const [x,z,s] of pill)svg+=`<rect x="${P(x-s/2)}" y="${P(z-s/2)}" width="${P(s)}" height="${P(s)}" fill="#7a2"/>`;
+for(const m of argv.flatMap((a,i)=>a==='--mark'?[argv[i+1]]:[])){const [mx,mz]=m.split(',').map(Number);svg+=`<circle cx="${P(mx-x0)}" cy="${P(mz-z0)}" r="${S*1.6}" fill="none" stroke="#e00" stroke-width="2"/>`}
 svg+='</svg>';writeFileSync(out,svg);console.log('wrote',out,`(${Wm}x${Wm} m, ${wallLines.length} wall runs)`);
