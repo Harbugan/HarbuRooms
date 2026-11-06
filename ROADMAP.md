@@ -24,7 +24,7 @@ Already implemented in the repository (subject to ongoing QA):
 | P2 | Room generation and proportions | **IN PROGRESS** — step 0 + 1 (tools, global room structure) in review, see `docs/WORLDGEN.md`; steps 2-5 planned | More believable, coherent Kane Parsons-inspired office spaces; less visibly random layout; reliable navigation. |
 | P2b | Cinematic intro (fall, landing, getting up) | **IN REVIEW** — implemented in `index.html`, tuned via F3 "CINEMATIC INTRO"; needs in-browser visual/audio check (see `docs/INTRO.md`) | ~8 s first-person intro on Start; skip + replay work; no regressions in lighting, movement or audio. |
 | P3 | Ambient audio landscape | Planned | Subtle spatial fluorescent hum and room ambience; controlled silence and variation; no intrusive breathing/footsteps. |
-| P4 | Environmental detail pass | Planned | Restrained stains, irregularities, odd openings and spatial cues without visual clutter. |
+| P4 | Environmental detail pass | **Step 4A IN REVIEW** — subtle wall wear/discoloration, carpet dampness, ceiling stains as a shader layer with F3 "ENVIRONMENT" controls (`docs/ENVIRONMENT.md`); needs in-browser visual check. Odd openings/spatial cues not started | Restrained stains, irregularities, odd openings and spatial cues without visual clutter. |
 | P5 | Subtle anomalies | Planned | Rare, unsettling events that preserve ambiguity; no mandatory combat or monster systems. |
 | P6 | Performance and polish | Later | Stable frame pacing, manageable chunk/resource usage, browser testing, bug fixes and documentation. |
 
