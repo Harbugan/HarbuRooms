@@ -43,3 +43,6 @@ Use Danish for task discussions and handovers unless asked otherwise. Keep respo
 
 ## Developer tuning rule
 When adding a new adjustable audio or visual parameter, register it in the F3 debug console (`devRegistry` and relevant live apply function in `index.html`). Keep normal settings and debug controls synchronized. Debug tuning must not alter game behavior until the user changes a value. Verify audio test buttons and pointer-lock resume after changes.
+
+## Cinematic intro
+The intro (`introStart/introSkip/introTick` in `index.html`) is a state machine (IDLE → FALLING → DISORIENTED → GETTING_UP → RECOVERING → COMPLETE) driven from `frame()`. It only adds offsets after `handheld()` and fades a DOM overlay; never move the camera or `look` directly from it. Its tunables live in `devValues`/`INTRO_CFG` (F3 "CINEMATIC INTRO"). Optional samples `intro_impact`, `intro_breath`, `intro_cloth` go through the audio manifest; procedural fallbacks are used when missing. Details: `docs/INTRO.md`.

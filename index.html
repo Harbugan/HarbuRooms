@@ -418,12 +418,12 @@ function drawMap(now){if(now-mapAt<250)return;mapAt=now;
   g.strokeStyle='#d00';g.lineWidth=2;g.beginPath();g.moveTo(px,pz);g.lineTo(px-Math.sin(yaw)*14,pz-Math.cos(yaw)*14);g.stroke()}
 /* ---- AUDIO: lysstofrør-brummen, drømmende ekko-skridt, vejrtrækning ---- */
 let hum,AUD=null,stepN=null,masterGain=null;
-let lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
-const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100};
+let introDuck=1,lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
+const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100,introEnabled:1,introDuration:8,introFall:1,introShake:.35,introBreath:.25,introImpact:.5,introDuck:.6};
 let devSaved={};try{devSaved=JSON.parse(localStorage.getItem('nullrooms.dev')||'{}')||{}}catch(e){}
 const devValues={...DEV_DEFAULT,...devSaved};let devGains=null,devOpen=false;
 function devScale(k){return Math.max(0,Math.min(200,Number(devValues[k])||0))/100}
-function applyDevGains(){if(!devGains)return;for(const k of ['hum','footsteps','breathing','cough'])devGains[k].gain.value=devScale(k);devGains.reverb.gain.value=.09*devScale('reverb')}
+function applyDevGains(){if(!devGains)return;for(const k of ['hum','footsteps','breathing','cough'])devGains[k].gain.value=devScale(k)*(k==='hum'?introDuck:1);devGains.reverb.gain.value=.09*devScale('reverb')}
 
 const AUDIO_ROOT='assets/audio/level0/';
 let audioBuffers={},audioManifest=null,audioLoading=null,audioStepIndex=0;
@@ -514,7 +514,7 @@ function footfalls(run){
   }
 }
 function breathe(){
-  if(!AUD||!playing||AUD.ctx.state!=='running')return;
+  if(!AUD||!playing||intro.active||AUD.ctx.state!=='running')return;
   const t=AUD.ctx.currentTime;
   if(t>=nextBreath){
     const running=runAmt>.5;
@@ -560,11 +560,11 @@ settingsBtn.onclick=()=>{showSettings=true;showMenu()};
 document.querySelector('#backBtn').onclick=()=>{showSettings=false;showMenu()};
 fullscreenBtn.onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch(e){document.querySelector('#error').textContent='Fullscreen unavailable: '+e.message}};
 document.addEventListener('fullscreenchange',()=>{fullscreenBtn.textContent=document.fullscreenElement?'WINDOWED':'FULLSCREEN'});
-exitBtn.onclick=()=>{if(masterGain&&hum)masterGain.gain.setTargetAtTime(0,hum.currentTime,.08);hasStarted=false;showSettings=false;padMode=false;keys.clear();look.yaw=view.yaw=0;look.pitch=view.pitch=0;const p=findSpawn();camera.position.set(p[0],1.7,p[1]);showMenu()};
+exitBtn.onclick=()=>{introCancel();if(masterGain&&hum)masterGain.gain.setTargetAtTime(0,hum.currentTime,.08);hasStarted=false;showSettings=false;padMode=false;keys.clear();look.yaw=view.yaw=0;look.pitch=view.pitch=0;const p=findSpawn();camera.position.set(p[0],1.7,p[1]);showMenu()};
 start.onclick=async()=>{const viaPad=padStartPending;devOpen=false;devPanel.hidden=true;showSettings=false;startHum();if(masterGain&&hum)masterGain.gain.setTargetAtTime(settings.volume/100,hum.currentTime,.08);try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock()}catch(error){if(viaPad)enterPadMode();else{document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}}};
-document.addEventListener('pointerlockchange',()=>{const locked=document.pointerLockElement===renderer.domElement;if(locked){padMode=false;padStartPending=false;setPadCursor(false)}playing=locked||padMode;if(playing){hasStarted=true;overlay.style.display='none'}else{keys.clear();if(!devOpen)showMenu()}});
-document.addEventListener('mousemove',e=>{if(document.pointerLockElement!==renderer.domElement)return;inputMode='kbm';const factor=.002*settings.sensitivity/50;look.yaw-=e.movementX*factor;look.pitch=Math.max(-1.48,Math.min(1.48,look.pitch-e.movementY*factor))});
-const keys=new Set();addEventListener('keydown',e=>{if(!playing)return;keys.add(e.code);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));addEventListener('keydown',e=>{if(e.code==='F8'&&matSystem){e.preventDefault();matSystem.toggle(scene);console.info('[materials] mode:',matSystem.mode)}});addEventListener('blur',()=>{keys.clear();padResetLatches()});addEventListener('keydown',e=>{inputMode='kbm';if(e.code==='Escape'&&padMode&&playing)pauseGame()});addEventListener('mousedown',()=>{inputMode='kbm'});camera.position.set(8,1.7,4);showMenu();
+document.addEventListener('pointerlockchange',()=>{const locked=document.pointerLockElement===renderer.domElement;if(locked){padMode=false;padStartPending=false;setPadCursor(false)}playing=locked||padMode;if(playing){const first=!hasStarted;hasStarted=true;overlay.style.display='none';if(first)introStart()}else{keys.clear();if(intro.active&&!devOpen)introSkip();if(!devOpen)showMenu()}});
+document.addEventListener('mousemove',e=>{if(document.pointerLockElement!==renderer.domElement||introLookLocked())return;inputMode='kbm';const factor=.002*settings.sensitivity/50;look.yaw-=e.movementX*factor;look.pitch=Math.max(-1.48,Math.min(1.48,look.pitch-e.movementY*factor))});
+const keys=new Set();addEventListener('keydown',e=>{if(!playing)return;keys.add(e.code);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));addEventListener('keydown',e=>{if(e.code==='F8'&&matSystem){e.preventDefault();matSystem.toggle(scene);console.info('[materials] mode:',matSystem.mode)}});addEventListener('blur',()=>{keys.clear();padResetLatches()});addEventListener('keydown',e=>{inputMode='kbm';if(e.code==='Escape'&&padMode&&playing){if(intro.active)introSkip();else pauseGame()}});addEventListener('mousedown',()=>{inputMode='kbm'});camera.position.set(8,1.7,4);showMenu();
 
 // ---- Controller support (Gamepad API) -------------------------------------------------
 // Polled once per frame from frame(). Feeds look.yaw/pitch and padState.mx/my (movement) so the
@@ -575,7 +575,7 @@ const padState={connected:false,id:'',index:-1,mapping:'',lx:0,ly:0,rx:0,ry:0,mx
 let padPrev=[],padNav={dir:'',timer:0},padDevAt=0;
 function padResetLatches(){padState.sprint=false;padState.crouch=false;padState.mx=padState.my=0}
 function setPadCursor(on){document.body.style.cursor=on?'none':''}
-function enterPadMode(){padStartPending=false;if(playing)return;padMode=true;playing=true;hasStarted=true;overlay.style.display='none';document.querySelector('#error').textContent='';setPadCursor(true)}
+function enterPadMode(){padStartPending=false;if(playing)return;padMode=true;playing=true;const first=!hasStarted;hasStarted=true;overlay.style.display='none';document.querySelector('#error').textContent='';setPadCursor(true);if(first)introStart()}
 // Pause: with mouse capture, releasing the lock reuses the existing pointerlockchange -> menu path.
 function pauseGame(silent){if(document.pointerLockElement===renderer.domElement){document.exitPointerLock();return}
   if(padMode){padMode=false;playing=false;keys.clear();padResetLatches();setPadCursor(false);if(!silent)showMenu()}}
@@ -610,7 +610,7 @@ function pollGamepad(dt){
     padNav.dir='';
     padState.mx=L[0];padState.my=-L[1]; // x: strafe right, y: forward (stick up = negative axis)
     const rate=PAD_LOOK_RATE*settings.padSens/50,lk=padShape(R,PAD_LOOK_CURVE),inv=settings.padInvertY?-1:1;
-    look.yaw-=lk[0]*rate*dt;look.pitch=Math.max(-1.48,Math.min(1.48,look.pitch-lk[1]*rate*dt*inv));
+    if(!introLookLocked())look.yaw-=lk[0]*rate*dt;if(!introLookLocked())look.pitch=Math.max(-1.48,Math.min(1.48,look.pitch-lk[1]*rate*dt*inv));
     if(pressed(10))padState.sprint=!padState.sprint;      // L3 toggles sprint
     if(!padState.mx&&!padState.my)padState.sprint=false;   // releasing the stick ends sprint
     padState.crouch=!!down[1];                              // B held — prepared, no crouch gameplay exists yet
@@ -641,6 +641,111 @@ addEventListener('gamepadconnected',e=>console.info('[pad] connected:',e.gamepad
 addEventListener('gamepaddisconnected',e=>{console.info('[pad] disconnected:',e.gamepad.id);pollGamepad(0)});
 document.addEventListener('pointerlockerror',()=>{if(padStartPending)enterPadMode()});
 
+// ---- Cinematic intro (fall -> disoriented -> getting up -> recovering) -------------------------
+// Self-contained state machine driven from frame() (no own loop). It only adds offsets on top of
+// handheld() (camera height/rotation) and fades a DOM overlay, so hand-over to normal movement is seamless.
+// States: IDLE -> FALLING -> DISORIENTED -> GETTING_UP -> RECOVERING -> COMPLETE. Tunables: F3 "CINEMATIC INTRO".
+const INTRO_CFG=[ // key,label,min,max,step,decimals,suffix (defaults live in DEV_DEFAULT)
+ ['introDuration','Intro duration',4,14,.5,1,' s'],['introFall','Fall intensity',0,2,.05,2,''],
+ ['introShake','Camera shake',0,1,.05,2,''],['introBreath','Breathing volume',0,1,.05,2,''],
+ ['introImpact','Impact volume',0,1,.05,2,''],['introDuck','Ambient ducking',0,1,.05,2,'']];
+const introEnabled=()=>Number(devValues.introEnabled)!==0;
+function iv(k){const c=INTRO_CFG.find(x=>x[0]===k),v=Number(devValues[k]);return Number.isFinite(v)?Math.max(c[2],Math.min(c[3],v)):DEV_DEFAULT[k]}
+const INTRO_T=[1.5,3.5,6.5,8],INTRO_LIE=.17,INTRO_ABORT=.4; // phase ends on the 8 s reference timeline; lying camera height (m); skip blend (s)
+const intro={state:'IDLE',active:false,t:0,k:1,ev:{},nextBreath:0,breathPh:0,duckEnv:0,abort:false,abortT:0,from:null,pose:{y:1.7,pitch:0,yaw:0,roll:0,fade:0},shakeV:0,seed:Math.random()*100,lastFade:0};
+const introFadeEl=document.createElement('div');introFadeEl.style.cssText='position:fixed;inset:0;background:#000;pointer-events:none;opacity:0;z-index:2';document.body.append(introFadeEl);
+const clamp01=x=>x<0?0:x>1?1:x,smooth=x=>{x=clamp01(x);return x*x*(3-2*x)},lerp=(a,b,s)=>a+(b-a)*s;
+function kf(keys,u){if(u<=keys[0][0])return keys[0][1];for(let i=1;i<keys.length;i++)if(u<=keys[i][0]){const a=keys[i-1],b=keys[i];return b[0]===a[0]?b[1]:lerp(a[1],b[1],smooth((u-a[0])/(b[0]-a[0])))}return keys[keys.length-1][1]}
+const IK_Y=[[0,INTRO_LIE],[.24,.42],[.30,.42],[.54,.95],[.68,.95],[1,1.7]],IK_P=[[0,-.12],[.26,.02],[.52,.05],[.68,-.10],[.9,.04],[1,0]],
+      IK_R=[[0,.38],[.26,.24],[.52,.10],[.68,.10],[.9,-.035],[1,0]],IK_W=[[0,-.25],[.26,-.12],[.52,.10],[.68,.14],[.9,.02],[1,0]];
+const inoise=(t,o)=>Math.sin(t*.9+intro.seed+o)*.5+Math.sin(t*2.1+intro.seed*2+o*1.7)*.3+Math.sin(t*3.7+intro.seed*3+o*2.3)*.2;
+function introLookLocked(){return intro.active&&!intro.abort&&intro.state!=='RECOVERING'}
+// Pose for reference-timeline time tn (seconds, 0..8). Every offset is 0 and y=1.7 at tn>=8.
+function introPose(tn,t){
+  const [T1,T2,T3,T4]=INTRO_T,I=iv('introFall'),S=iv('introShake'),sn=S/.35,P=intro.pose;
+  let y=1.7,pitch=0,yaw=0,roll=0,fade=0,w=0;
+  const y0=Math.min(H-.3,1.5+1.1*I),lieP=-.12,lieR=.38,lieW=-.25; // start height stays 0.3 m under the ceiling
+  if(tn<T1){ // FALLING: gravity-accelerated drop with a tumbling wobble, stops dead at the carpet
+    const s=tn/T1;y=y0-(y0-INTRO_LIE)*s*s;
+    pitch=lerp(.28*I,lieP,Math.pow(s,1.4))+Math.sin(s*4.1)*.12*I*(1-s);
+    roll=lieR*s*s+Math.sin(s*5.2)*.18*I*(1-s);yaw=lieW*s+Math.sin(s*3.7+1)*.22*I*(1-s);
+    fade=.93*(1-smooth(tn/1.0));
+  }else{
+    const tau=tn-T1,kick=Math.exp(-tau*5.5);let heavy;
+    if(tn<T2){ // DISORIENTED: lying tilted on the carpet, irregular small drift
+      const fo=1-smooth((tn-(T2-.5))/.5),d=(.03+.06*sn*.5)*fo*smooth(tau/.6);
+      y=INTRO_LIE;pitch=lieP+inoise(t,0)*d;roll=lieR+inoise(t,4)*d*1.4;yaw=lieW+inoise(t,8)*d*1.6+.07*smooth(tau/2)*fo;
+    }else if(tn<T3){ // GETTING_UP: head lift -> knees (pause) -> stand with balance correction
+      const u=(tn-T2)/(T3-T2);y=kf(IK_Y,u);pitch=kf(IK_P,u);roll=kf(IK_R,u);yaw=kf(IK_W,u);
+      const eff=Math.sin(Math.PI*u)*.012*sn;pitch+=inoise(t*1.7,1)*eff;roll+=inoise(t*1.7,5)*eff*1.5;yaw+=inoise(t*1.7,9)*eff;
+    }else{ // RECOVERING: standing, small balance sway settles to zero
+      const e=1-smooth((tn-T3)/(T4-T3)),a=tn-T3;y=1.7;
+      roll=Math.sin(a*3.2)*.018*sn*e;pitch=Math.sin(a*2.4+1)*.012*sn*e;yaw=Math.sin(a*1.9+2)*.01*sn*e;
+    }
+    // impact kick + rebound (decays quickly)
+    const k=kick*sn;y+=.045*I*Math.exp(-tau*9)*Math.abs(Math.sin(tau*16));
+    pitch+=-.2*(S)*kick+Math.sin(t*41)*.07*k;roll+=Math.sin(t*33+1)*.08*k;yaw+=Math.sin(t*29+2)*.05*k;
+    fade=Math.max(fade,.55*Math.exp(-tau*5)*Math.min(1,I+.3));
+    // breathing: slow chest rise that calms down and is gone exactly at T4
+    heavy=lerp(1.6,1,smooth(tau/(T4-T1)));w=smooth((y-INTRO_LIE)/1.5);
+    const bs=tn<T3?1:1-smooth((tn-T3)/(T4-T3)),amp=.010*lerp(1,.35,w)*heavy*bs;
+    y+=Math.sin(intro.breathPh)*amp;pitch+=Math.sin(intro.breathPh)*.006*heavy*bs;
+  }
+  P.y=y;P.pitch=pitch;P.yaw=yaw;P.roll=roll;P.fade=fade;
+  intro.shakeV=tn<T1?0:Math.exp(-(tn-T1)*4)*1.2*sn;
+}
+function introCloth(dur,level){if(!AUD)return;const t=AUD.ctx.currentTime+.01,v=level*iv('introBreath')/.25;if(v<=0)return;
+  if(playLevel0Sample('intro_cloth',t,v*.5,AUD.foley))return;
+  AUD.puff(t,dur,v*.07,350,3200,AUD.foley);AUD.puff(t+dur*.45,dur*.7,v*.04,500,2600,AUD.foley)}
+function introBreathSound(heavy){if(!AUD)return;const v=iv('introBreath');if(v<=0)return;const t=AUD.ctx.currentTime+.01;
+  if(!playLevel0Sample('intro_breath',t,v*.92*heavy,AUD.breathBus)&&!playLevel0Sample('breathing_idle',t,v*.92*heavy,AUD.breathBus))
+    AUD.puff(t,lerp(1.1,1.45,1/heavy-.6),v*.15*heavy,160,1250,AUD.breathBus)}
+function introImpactSound(){if(!AUD)return;const v=iv('introImpact');if(v<=0)return;const a=AUD.ctx,t=a.currentTime+.01;
+  if(playLevel0Sample('intro_impact',t,v,AUD.foley))return;
+  try{const o=a.createOscillator(),g=a.createGain();o.type='sine';o.frequency.setValueAtTime(95,t);o.frequency.exponentialRampToValueAtTime(34,t+.28);
+    g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(v*.55,t+.012);g.gain.exponentialRampToValueAtTime(.0001,t+.5);
+    o.connect(g).connect(AUD.foley);o.start(t);o.stop(t+.55);o.onended=()=>{o.disconnect();g.disconnect()}}catch(e){}
+  AUD.puff(t,.22,v*.5,60,520,AUD.foley);AUD.puff(t+.09,.35,v*.18,90,900,AUD.foley)}
+function introEvents(tn){const [T1,T2,,T4]=INTRO_T,ev=intro.ev,once=(k,at,fn)=>{if(!ev[k]&&tn>=at){ev[k]=1;try{fn()}catch(e){console.warn('[intro] audio',e)}}};
+  once('impact',T1,introImpactSound);once('c1',2.3,()=>introCloth(.35,.5));once('c2',3.8,()=>introCloth(.4,.6));
+  once('c3',4.7,()=>introCloth(.5,.8));once('c4',5.9,()=>introCloth(.45,.7));
+  if(tn>=intro.nextBreath&&tn<T4-.5){const p=clamp01((tn-T1)/(T4-T1));try{introBreathSound(lerp(1.5,1,p))}catch(e){}intro.nextBreath=tn+lerp(2.6,3.8,p)}}
+function introSetDuck(env){const m=1-iv('introDuck')*env;if(Math.abs(m-introDuck)>.003){introDuck=m;applyDevGains()}}
+function introPlace(){ // keep the current spot if it has room to lie/kneel, else search outwards; never moves the world
+  const clear=(x,z)=>{if(collide(x,z))return false;for(let a=0;a<8;a++)if(collide(x+Math.cos(a*.7854)*1.1,z+Math.sin(a*.7854)*1.1))return false;return true};
+  const ox=camera.position.x,oz=camera.position.z;if(clear(ox,oz))return;
+  for(let r=.5;r<8;r+=.5)for(let a=0;a<24;a++){const x=ox+Math.cos(a/24*6.2832)*r,z=oz+Math.sin(a/24*6.2832)*r;if(clear(x,z)){camera.position.x=x;camera.position.z=z;return}}}
+function introStart(force){
+  if(intro.active)introCancel();
+  if(!force&&!introEnabled())return false;
+  introPlace();
+  Object.assign(intro,{state:'FALLING',active:true,t:0,k:iv('introDuration')/INTRO_T[3],ev:{},nextBreath:INTRO_T[0]+.5,breathPh:0,duckEnv:0,abort:false,abortT:0,from:null,seed:Math.random()*100});
+  introPose(0,0);introApply();return true}
+function introApply(){const P=intro.pose;camera.position.y=P.y;camera.rotation.x+=P.pitch;camera.rotation.y+=P.yaw;camera.rotation.z+=P.roll;
+  if(Math.abs(P.fade-intro.lastFade)>.004){intro.lastFade=P.fade;introFadeEl.style.opacity=P.fade}
+  vhsMat.uniforms.shake.value+=intro.shakeV}
+function introCancel(){ // immediate, safe exit: restores camera height, fade, ambience and the normal breathing timer
+  const was=intro.active;intro.active=false;intro.abort=false;intro.state=was?'COMPLETE':intro.state;intro.shakeV=0;
+  camera.position.y=1.7;introFadeEl.style.opacity=0;intro.lastFade=0;introDuck=1;applyDevGains();
+  if(was&&AUD){nextBreath=AUD.ctx.currentTime+3.5}lastFootstep=0}
+function introSkip(){if(!intro.active||intro.abort)return;intro.abort=true;intro.abortT=0;intro.from={...intro.pose};intro.state='RECOVERING'}
+// Called every frame after handheld(); dt in seconds. Time only advances while the game is actually playing (pause freezes it).
+function introTick(dt){
+  if(!intro.active)return;
+  if(intro.abort){intro.abortT+=dt;const s=smooth(intro.abortT/INTRO_ABORT),f=intro.from,P=intro.pose;
+    P.y=lerp(f.y,1.7,s);P.pitch=lerp(f.pitch,0,s);P.yaw=lerp(f.yaw,0,s);P.roll=lerp(f.roll,0,s);P.fade=lerp(f.fade,0,s);intro.shakeV*=Math.exp(-dt*8);
+    introSetDuck(intro.duckEnv*(1-s));introApply();if(intro.abortT>=INTRO_ABORT)introCancel();return}
+  if(playing)intro.t+=dt;
+  const tn=Math.min(INTRO_T[3],intro.t/intro.k),[T1,T2,T3,T4]=INTRO_T;
+  intro.state=tn<T1?'FALLING':tn<T2?'DISORIENTED':tn<T3?'GETTING_UP':'RECOVERING';
+  if(playing&&tn>=T1)intro.breathPh+=dt*6.2832*lerp(.42,.26,clamp01((tn-T1)/(T4-T1)));
+  introPose(tn,intro.t);
+  if(playing){introEvents(tn);
+    const target=tn<T1?0:tn<T2?1:1-smooth((tn-T2)/(T4-T2));intro.duckEnv+=(target-intro.duckEnv)*(target>intro.duckEnv?1-Math.exp(-dt*30):1);introSetDuck(intro.duckEnv)}
+  introApply();
+  if(intro.t/intro.k>=T4){intro.pose.y=1.7;introCancel()}
+}
+
 const devRegistry=[
 ['AUDIO','hum','Fluorescent hum',0,200],['AUDIO','footsteps','Carpet footsteps',0,200],
 ['AUDIO','breathing','Breathing',0,200],['AUDIO','cough','Cough',0,200],['AUDIO','reverb','Foley reverb',0,200],
@@ -659,6 +764,18 @@ for(const [section,key,label,min,max] of devRegistry){
  input.oninput=()=>{const value=Number(input.value);if(regular){settings[key]=value;applySettings();const el=document.getElementById(key);if(el){el.value=value;const out=document.getElementById(key+'Value');if(out)out.textContent=value+(key==='fov'?'°':'%')}}else{devValues[key]=value;applyDevGains();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}}sync()};
  row.append(caption,input,output);devControls.append(row);
 }
+// Cinematic intro section (same storage/reset/copy as the audio dev values)
+{const h=document.createElement('h3');h.textContent='CINEMATIC INTRO';devControls.append(h);
+ const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';en.append(cb,' Intro enabled');
+ cb.onchange=()=>{devValues.introEnabled=cb.checked?1:0;try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}};devSync.push(()=>{cb.checked=introEnabled()});cb.checked=introEnabled();devControls.append(en);
+ for(const [key,label,min,max,step,dec,suffix] of INTRO_CFG){
+  const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output');
+  cap.textContent=label;input.type='range';input.min=min;input.max=max;input.step=step;
+  const sync=()=>{input.value=iv(key);out.textContent=iv(key).toFixed(dec)+suffix};devSync.push(sync);sync();
+  input.oninput=()=>{devValues[key]=Number(input.value);try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}sync()};
+  row.append(cap,input,out);devControls.append(row)}
+ const rb=document.createElement('button');rb.textContent='REPLAY INTRO';rb.onclick=()=>{if(!hasStarted){document.querySelector('#devStatus').textContent='Start the game first, then replay.';return}
+  toggleDev(false);introStart(true)};devControls.append(rb)}
 const devPadInvert=document.querySelector('#devPadInvert');devSync.push(()=>{devPadInvert.checked=!!settings.padInvertY});devPadInvert.onchange=()=>{settings.padInvertY=devPadInvert.checked;applySettings();document.getElementById('padInvertY').checked=settings.padInvertY};
 function devRefresh(){devSync.forEach(fn=>fn());document.querySelector('#devStatus').textContent='Audio: '+(AUD?.ctx.state||'not started')+' | '+['footsteps','breathing_idle','cough'].map(k=>k+': '+(audioBuffers[k]?.length?'file':'fallback')).join(' / ')}
 function toggleDev(open){devOpen=open;devPanel.hidden=!open;if(open){if(padMode)pauseGame(true);if(document.pointerLockElement===renderer.domElement)document.exitPointerLock();devRefresh()}else if(hasStarted&&overlay.style.display==='none')renderer.domElement.requestPointerLock().catch(()=>showMenu())}
@@ -695,6 +812,6 @@ function handheld(now,dt,moving,running){const t=now/1000;moveAmt+=((moving?1:0)
   camera.rotation.set(view.pitch+sx+Math.cos(elapsed*2)*.009*moveAmt+Math.sin(t*37)*.012*jolt+Math.sin(t*23)*.009*coughPulse,view.yaw+sy+Math.cos(elapsed)*.008*moveAmt,roll+Math.sin(t*29)*.02*jolt,'YXZ');
   const f=settings.fov+(settings.bob?Math.sin(t*.4)*.8+Math.sin(t*1.3)*.4-runAmt*3-jolt*1.5:0);if(Math.abs(camera.fov-f)>.01){camera.fov=f;camera.updateProjectionMatrix()}
   vhsMat.uniforms.shake.value=jolt+runAmt*.5+coughPulse*.18}
-let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;pollGamepad(dt);const run=keys.has('ShiftLeft')||keys.has('ShiftRight')||padState.sprint;if(devOpen&&now-padDevAt>100){padDevAt=now;document.querySelector('#devPad').textContent=padDebugText(now)}if(playing){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'))+padState.my;const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'))+padState.mx;if(f||s){const len=Math.hypot(f,s),speed=(run?4.6:2.5)*Math.min(1,len)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(run?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(run)}else {lastFootstep=0;camera.position.y+=(1.7-camera.position.y)*.12}}updateChunks();if(DBG_MAP)drawMap(now);ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight')||padState.mx!==0||padState.my!==0);handheld(now,dt,mv,mv&&(run));breathe();
+let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;pollGamepad(dt);const run=keys.has('ShiftLeft')||keys.has('ShiftRight')||padState.sprint;if(devOpen&&now-padDevAt>100){padDevAt=now;document.querySelector('#devPad').textContent=padDebugText(now)}if(playing&&!intro.active){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'))+padState.my;const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'))+padState.mx;if(f||s){const len=Math.hypot(f,s),speed=(run?4.6:2.5)*Math.min(1,len)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(run?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(run)}else {lastFootstep=0;camera.position.y+=(1.7-camera.position.y)*.12}}updateChunks();if(DBG_MAP)drawMap(now);ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&!intro.active&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight')||padState.mx!==0||padState.my!==0);handheld(now,dt,mv,mv&&(run));introTick(dt);breathe();
 vhsMat.uniforms.time.value=now/1000%1000;renderer.setRenderTarget(rt);renderer.render(scene,camera);renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();while(queue.length)updateChunks();{const [x,z]=findSpawn();camera.position.set(x,1.7,z)}requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
 </script></body></html>
