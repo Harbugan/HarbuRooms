@@ -61,6 +61,13 @@ export const LEVEL0_DEFAULTS = {
   },
 };
 const KINDS = Object.keys(LEVEL0_DEFAULTS);
+
+// Environmental details (step 4A, docs/ENVIRONMENT.md): a shader-only overlay inside the three shared materials. All values are fractions 0..1.
+//   wear       share of 2 m wall segments (one side of a wall each) with baseboard grime or a soft discoloured patch
+//   damp       share of 4 x 4 m floor cells holding one soft damp-carpet patch
+//   ceil       share of 0.5 x 1.0 m ceiling panels with a faint stain
+//   intensity  strength of every effect (0.25 = barely noticeable);  show = paint the affected spots in flat debug colours
+export const ENV_DEFAULTS = { enabled: true, wear: 0.08, damp: 0.03, ceil: 0.02, intensity: 0.25, show: false };
 const CHANNELS = ['baseColor', 'normal', 'roughness'];
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -133,6 +140,68 @@ float macroField(vec3 P){
   #endif
   q+=uMacroSeed;return (mNoise(q/uMacroScale.x)*.65+mNoise(q/uMacroScale.y+17.)*.35)*2.-1.;}
 `;
+// Environmental details. Every decision is a pure hash of WORLD cell coordinates (wall segment / floor cell / ceiling panel), so
+// a spot looks identical after a chunk is unloaded and rebuilt, on both sides of a chunk seam, and nothing is stored per chunk.
+// A cell is affected when its hash < frequency, so raising a slider only ever adds cells. Effects multiply the albedo only
+// (baked light, normal and roughness are untouched) and fade out inside their cell, so there are no hard overlay edges.
+const GLSL_ENV = /* glsl */`
+uniform vec4 uEnvF; uniform vec2 uEnvI; varying vec3 vEnvN;
+float eH(vec2 c,float s){return mHash(c+vec2(s*7.31,s*3.17));}
+vec3 envDetail(vec3 P,vec3 N,out float mk,out vec3 dbg){
+  mk=0.;dbg=vec3(0.);
+  if(uEnvF.x<.5)return vec3(1.);
+  vec3 strong=vec3(1.);float amt=clamp(uEnvI.x*1.5,0.,1.);
+  #ifdef ENV_WALL
+  if(abs(N.y)<.5){
+    bool ax=abs(N.x)>abs(N.z);
+    float al=ax?P.z:P.x,ac=ax?P.x:P.z,sd=ax?N.x:N.z;
+    vec2 c=vec2(floor(al/2.),floor(ac+.5)*4.+(ax?1.:0.)+(sd>0.?2.:0.)); // 2 m segment of ONE wall face
+    if(eH(c,1.)<uEnvF.y){
+      float lx=al-c.x*2.,edge=smoothstep(0.,.45,lx)*smoothstep(0.,.45,2.-lx);
+      float n=mNoise(vec2(al*1.9,P.y*1.3)+c*5.3);
+      if(eH(c,2.)<.5){ // grime along the baseboard
+        float h=(.22+.3*eH(c,3.))*(.55+.9*mNoise(vec2(al*2.3,c.y)+c.x*3.1));
+        mk=(1.-smoothstep(h*.25,h,P.y))*edge;strong=vec3(.62,.55,.40);
+      }else{ // soft yellowed / slightly darker patch of wallpaper
+        vec2 d=(vec2(lx,P.y)-vec2(.8+.4*eH(c,4.),.9+eH(c,5.)))/vec2(.5+.35*eH(c,6.),.4+.4*eH(c,7.));
+        d+=(n-.5)*.6;mk=(1.-smoothstep(.25,1.,length(d)))*edge*(.7+.6*n);
+        strong=eH(c,8.)<.3?vec3(.78,.74,.68):vec3(.84,.78,.58);
+      }
+      dbg=vec3(1.,0.,.8);
+    }
+  }
+  #endif
+  #ifdef ENV_FLOOR
+  if(N.y>.5){
+    vec2 c=floor(P.xz/4.); // 4 x 4 m cell; patch (<= 1.9 m reach) never crosses the cell border
+    if(eH(c,11.)<uEnvF.z){
+      vec2 d=P.xz-((c+.5)*4.+(vec2(eH(c,12.),eH(c,13.))-.5));
+      d+=(vec2(mNoise(P.xz*1.4+c),mNoise(P.xz*1.4+c+9.1))-.5)*.55;
+      float rad=.6+.5*eH(c,14.);
+      mk=(1.-smoothstep(rad*.3,rad,length(d)))*(.65+.35*mNoise(P.xz*3.7));
+      strong=vec3(.62,.57,.50);dbg=vec3(0.,.5,1.);
+    }
+  }
+  #endif
+  #ifdef ENV_CEIL
+  if(N.y<-.5){
+    vec2 pp=vec2(P.x/.5,P.z),c=floor(pp),f=fract(pp); // exactly one 0.5 x 1.0 m panel
+    if(eH(c,21.)<uEnvF.w){
+      vec2 cn=vec2(eH(c,22.)<.5?0.:1.,eH(c,23.)<.5?0.:1.);
+      float m=1.-smoothstep(.05,.95,length((f-cn)*vec2(.5,1.)));
+      mk=(.4+.6*m)*(.8+.4*mNoise(P.xz*6.));
+      strong=vec3(.86,.80,.66);dbg=vec3(.2,1.,.2);amt=clamp(uEnvI.x*2.2,0.,1.);
+    }
+  }
+  #endif
+  mk=clamp(mk,0.,1.);
+  return mix(vec3(1.),strong,mk*amt);
+}
+`;
+const GLSL_ENV_APPLY = /* glsl */`
+{float em;vec3 ed;vec3 et=envDetail(vMacroP,vEnvN,em,ed);diffuseColor.rgb*=et;
+ if(uEnvI.y>.5&&em>.02)diffuseColor.rgb=mix(diffuseColor.rgb,ed,clamp(em*2.,0.,1.));}
+`;
 const GLSL_COLOR = /* glsl */`
 float macroV=macroField(vMacroP);
 #ifdef USE_COLOR
@@ -144,7 +213,7 @@ const GLSL_ROUGH = /* glsl */`
 roughnessFactor=clamp(roughnessFactor+uMacroAmp.y*macroV,.3,1.);
 `;
 
-function makePbrMaterial(THREE, kind, def, tex) {
+function makePbrMaterial(THREE, kind, def, tex, envU) {
   const m = new THREE.MeshStandardMaterial({
     vertexColors: true, map: tex.baseColor, normalMap: tex.normal, roughnessMap: tex.roughness, roughness: def.params.roughness, metalness: 0,
   });
@@ -156,11 +225,11 @@ function makePbrMaterial(THREE, kind, def, tex) {
   };
   m.userData.uniforms = u;
   m.onBeforeCompile = shader => {
-    Object.assign(shader.uniforms, u);
-    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vMacroP; attribute float aLight; varying float vLight;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvMacroP=position; vLight=aLight;');
-    shader.fragmentShader = (def.macro.plane === 'wall' ? '#define MACRO_WALL\n' : '') + shader.fragmentShader
-      .replace('#include <common>', '#include <common>\n' + GLSL_COMMON)
-      .replace('#include <color_fragment>', GLSL_COLOR)
+    Object.assign(shader.uniforms, u, envU);
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vMacroP; attribute float aLight; varying float vLight; varying vec3 vEnvN;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvMacroP=position; vLight=aLight; vEnvN=normal;');
+    shader.fragmentShader = (def.macro.plane === 'wall' ? '#define MACRO_WALL\n' : '') + '#define ENV_' + kind.toUpperCase() + '\n' + shader.fragmentShader
+      .replace('#include <common>', '#include <common>\n' + GLSL_COMMON + GLSL_ENV)
+      .replace('#include <color_fragment>', GLSL_COLOR + GLSL_ENV_APPLY)
       .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.directSpecular*=uSpec;reflectedLight.indirectSpecular*=uSpec;')
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n' + GLSL_ROUGH);
   };
@@ -185,6 +254,9 @@ export function createLevel0Materials(THREE, opts) {
   const manifestUrl = new URL(opts.manifestUrl || 'assets/textures/level0/manifest.json', document.baseURI).href;
   const aniso = renderer.capabilities.getMaxAnisotropy();
   const defs = {}, pbr = {}, tex = {}, state = {}, kindOf = new Map(), scaled = {};
+  const env = { ...ENV_DEFAULTS }, envU = { uEnvF: { value: new THREE.Vector4() }, uEnvI: { value: new THREE.Vector2() } }; // shared by all three materials: no recompiles, live
+  const applyEnv = () => { envU.uEnvF.value.set(env.enabled ? 1 : 0, env.wear, env.damp, env.ceil); envU.uEnvI.value.set(env.intensity, env.show ? 1 : 0); };
+  applyEnv();
 
   for (const kind of KINDS) {
     const def = defs[kind] = { ...LEVEL0_DEFAULTS[kind], params: { ...LEVEL0_DEFAULTS[kind].params } };
@@ -196,7 +268,7 @@ export function createLevel0Materials(THREE, opts) {
     };
     tex[kind] = { baseColor: base, normal: mk(normalCanvas, false), roughness: mk(roughnessCanvas, false) };
     state[kind] = { baseColor: 'procedural', normal: 'procedural', roughness: 'procedural' }; scaled[kind] = new Set();
-    pbr[kind] = makePbrMaterial(THREE, kind, def, tex[kind]);
+    pbr[kind] = makePbrMaterial(THREE, kind, def, tex[kind], envU);
     kindOf.set(pbr[kind], kind); kindOf.set(legacy[kind], kind);
   }
 
@@ -223,6 +295,9 @@ export function createLevel0Materials(THREE, opts) {
     active,
     defs,
     status: () => JSON.parse(JSON.stringify(state)),
+    // Environmental details (docs/ENVIRONMENT.md). Pure uniforms: live, no chunk rebuild. NULLROOMS_MATERIALS.setEnvironment({ wear: .3, show: true })
+    env,
+    setEnvironment(p) { for (const k in ENV_DEFAULTS) if (p && k in p) env[k] = typeof ENV_DEFAULTS[k] === 'boolean' ? !!p[k] : Math.max(0, Math.min(1, Number(p[k]) || 0)); applyEnv(); return { ...env }; },
     kindOf: m => kindOf.get(m),
     // Re-point every mesh under `root` to the active material of its kind (no-op for glow / grid / unknown materials).
     apply(root) { root.traverse(o => { const k = o.isMesh && kindOf.get(o.material); if (k) o.material = active[k]; }); },

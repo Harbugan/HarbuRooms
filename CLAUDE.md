@@ -46,3 +46,6 @@ When adding a new adjustable audio or visual parameter, register it in the F3 de
 
 ## Cinematic intro
 The intro (`introStart/introSkip/introTick` in `index.html`) is a state machine (IDLE → FALLING → DISORIENTED → GETTING_UP → RECOVERING → COMPLETE) driven from `frame()`. It only adds offsets after `handheld()` and fades a DOM overlay; never move the camera or `look` directly from it. Its tunables live in `devValues`/`INTRO_CFG` (F3 "CINEMATIC INTRO"). Optional samples `intro_impact`, `intro_breath`, `intro_cloth` go through the audio manifest; procedural fallbacks are used when missing. Details: `docs/INTRO.md`.
+
+## Environmental details (step 4A)
+Wear, dampness and ceiling stains are a shader-only layer in the shared Level 0 materials (`GLSL_ENV` in `src/materials/level0.js`), driven by shared uniforms and the F3 "ENVIRONMENT" section (`ENV_CFG`/`applyEnv` in `index.html`). Rules: decide per world-space cell via hash (deterministic, no per-chunk state, no new meshes/materials/draw calls), change albedo only, keep effects subtle and fading inside their cell. Details: `docs/ENVIRONMENT.md`.
