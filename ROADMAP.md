@@ -1,6 +1,6 @@
 # THE NULL ROOMS — Roadmap
 
-Updated: 2026-11-05
+Updated: 2026-11-06
 
 This is a **planning document**, not a claim that all items have been tested or completed. Progress is based on repository review; visual acceptance requires in-game testing. Work on one milestone at a time.
 
@@ -13,6 +13,7 @@ Already implemented in the repository (subject to ongoing QA):
 - Level 0 external wallpaper, carpet and ceiling textures with procedural fallback and material comparison.
 - 0.5 × 1.0 m ceiling panel grid with aligned fluorescent fixtures.
 - Baked vertex-lighting, hemisphere fill, fog and VHS effects.
+- Controller support (Gamepad API): move, look, sprint, menus, hot-plug; see `docs/CONTROLS.md`.
 - Fluorescent hum, clicking and flicker sounds. Footsteps and breathing are intentionally disabled for now.
 
 ## Prioritized milestones
@@ -28,10 +29,9 @@ Already implemented in the repository (subject to ongoing QA):
 
 ## Nice to have — not in current scope
 
-### Controller support
-- Use browser **Gamepad API**, including compatible Xbox/XInput-style controllers where supported.
-- Movement, camera look, pause/menu and settings navigation; dead zones and sensitivity.
-- Likely the smallest of these optional features, but still requires browser/device testing.
+### Controller support — IMPLEMENTED (in review)
+- Done: Gamepad API (no dependencies), analog move/look, sprint, menu navigation, hot-plug, live settings and F3 debug info. See `docs/CONTROLS.md`.
+- Needs real-hardware testing (Xbox, DualShock/DualSense) in Chrome/Edge and Firefox; crouch and interact are input-only until the game gets those mechanics.
 
 ### VR / Meta Quest
 - Investigate **WebXR** support and headset/controller input.
