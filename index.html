@@ -441,12 +441,12 @@ try{const a=new (window.AudioContext||window.webkitAudioContext)(),sr=a.sampleRa
   const flicker=(v=1)=>{const t=a.currentTime+.01,n=3+Math.floor(Math.random()*6);dip(t);for(let i=0;i<n;i++)click(t+i*R(.015,.065),R(.05,.13)*v)};
   const tick=()=>{if(Math.random()<.16)flicker(.7);else click(a.currentTime+.02,R(.03,.08));setTimeout(tick,R(300,2900))};tick();
   // Player foley: short, carpet-damped noises with very little early reflection.
-  const foley=a.createGain();foley.gain.value=.8;foley.connect(out);
+  const foley=a.createGain();foley.gain.value=1;foley.connect(out);
   const room=a.createConvolver(),roomWet=a.createGain(),irLen=Math.floor(sr*.19);
   const roomIR=a.createBuffer(2,irLen,sr);
   for(let c=0;c<2;c++){const d=roomIR.getChannelData(c);let lp=0;for(let i=0;i<irLen;i++){lp+=(Math.random()*2-1-lp)*.14;d[i]=lp*Math.exp(-i/sr*33)*.24}}
   room.buffer=roomIR;roomWet.gain.value=.09;foley.connect(room).connect(roomWet).connect(out);
-  const voice=a.createGain(),voiceLP=filt('lowpass',950);voice.gain.value=.55;voiceLP.connect(voice).connect(foley);
+  const voice=a.createGain(),voiceLP=filt('lowpass',950);voice.gain.value=1;voiceLP.connect(voice).connect(foley);
   const puff=(t,duration,level,low,high,target=foley)=>{
     const src=a.createBufferSource(),bp=filt('bandpass',Math.sqrt(low*high),.45),lp=filt('lowpass',high),env=a.createGain();
     src.buffer=nbuf;env.gain.setValueAtTime(.00001,t);env.gain.linearRampToValueAtTime(level,t+Math.min(.035,duration*.2));
@@ -454,17 +454,17 @@ try{const a=new (window.AudioContext||window.webkitAudioContext)(),sr=a.sampleRa
     src.connect(bp).connect(lp).connect(env).connect(target);src.start(t,R(0,3),duration+.01);
   };
   AUD={flicker,ctx:a,foley,voiceLP,puff};
-  nextBreath=a.currentTime+1.5;nextCough=a.currentTime+R(35,85);
+  nextBreath=a.currentTime+1.5;nextCough=a.currentTime+R(18,32);
 }catch(e){console.warn('Audio unavailable',e)}}
 function footfalls(run){
   if(!AUD||!playing||AUD.ctx.state!=='running')return;
   const t=AUD.ctx.currentTime,interval=run?.30:.46;
   if(t-lastFootstep<interval)return;
   lastFootstep=t;
-  const v=(run?.034:.024)*(.83+Math.random()*.34);
+  const v=(run?.22:.16)*(.83+Math.random()*.34);
   AUD.puff(t,.11+Math.random()*.055,v,85,580);
   // A second soft compression of the carpet, not a hard heel click.
-  AUD.puff(t+.055,.09,v*.3,100,400);
+  AUD.puff(t+.055,.09,v*.38,100,400);
 }
 function breathe(){
   if(!AUD||!playing||AUD.ctx.state!=='running')return;
@@ -472,13 +472,13 @@ function breathe(){
   if(t>=nextBreath){
     const running=runAmt>.5;
     const duration=running?1.05:1.45;
-    AUD.puff(t,duration,running?.008:.0048,160,1250,AUD.voiceLP);
+    AUD.puff(t,duration,running?.065:.038,160,1250,AUD.voiceLP);
     nextBreath=t+(running?2.25:3.8)+Math.random()*.55;
   }
   if(t>=nextCough){
     // Rare, soft double burst; the camera receives a matching short impulse.
-    AUD.puff(t,.17,.035,180,1800,AUD.voiceLP);
-    AUD.puff(t+.19,.21,.025,150,1500,AUD.voiceLP);
+    AUD.puff(t,.17,.16,180,1800,AUD.voiceLP);
+    AUD.puff(t+.19,.21,.11,150,1500,AUD.voiceLP);
     coughPulse=1;
     nextCough=t+65+Math.random()*145;
   }
