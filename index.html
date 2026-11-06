@@ -419,6 +419,42 @@ function drawMap(now){if(now-mapAt<250)return;mapAt=now;
 /* ---- AUDIO: lysstofrør-brummen, drømmende ekko-skridt, vejrtrækning ---- */
 let hum,AUD=null,stepN=null,masterGain=null;
 let lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
+const AUDIO_ROOT='assets/audio/level0/';
+let audioBuffers={},audioManifest=null,audioLoading=null,audioStepIndex=0;
+async function loadLevel0Audio(ctx){
+  if(audioLoading)return audioLoading;
+  audioLoading=(async()=>{
+    try{
+      const res=await fetch(AUDIO_ROOT+'manifest.json',{cache:'no-cache'});
+      if(!res.ok)throw Error('Missing audio manifest');
+      const manifest=await res.json(),loaded={};
+      await Promise.all(Object.entries(manifest.sounds||{}).map(async([name,config])=>{
+        loaded[name]=[];
+        for(const file of (config.files||[])){
+          if(typeof file!=='string'||!/^([a-z0-9_-]+\/)*[a-z0-9_-]+\.(ogg|mp3|wav)$/i.test(file))continue;
+          try{
+            const response=await fetch(AUDIO_ROOT+file);
+            if(response.ok)loaded[name].push(await ctx.decodeAudioData(await response.arrayBuffer()));
+          }catch(e){console.warn('Audio file unavailable',file,e)}
+        }
+      }));
+      audioBuffers=loaded;audioManifest=manifest;
+    }catch(e){console.warn('Using procedural audio fallback',e)}
+  })();
+  return audioLoading;
+}
+function playLevel0Sample(name,t,gain){
+  if(!AUD)return false;
+  const samples=audioBuffers[name];
+  if(!samples||!samples.length)return false;
+  const cfg=audioManifest.sounds[name],src=AUD.ctx.createBufferSource(),amp=AUD.ctx.createGain();
+  const index=name==='footsteps'?(audioStepIndex++%samples.length):Math.floor(Math.random()*samples.length);
+  src.buffer=samples[index];
+  amp.gain.value=gain*(typeof cfg.gain==='number'?Math.max(0,Math.min(2,cfg.gain)):1);
+  src.connect(amp).connect(AUD.foley);src.start(t);
+  src.onended=()=>{src.disconnect();amp.disconnect()};
+  return true;
+}
 function startHum(){if(hum){if(hum.state==='suspended')hum.resume();return}
 try{const a=new (window.AudioContext||window.webkitAudioContext)(),sr=a.sampleRate;hum=a;
   const out=a.createGain();out.gain.value=.9;masterGain=a.createGain();masterGain.gain.value=settings.volume/100;const cmp=a.createDynamicsCompressor();cmp.threshold.value=-16;cmp.knee.value=18;cmp.ratio.value=4;out.connect(cmp).connect(masterGain).connect(a.destination);
@@ -454,6 +490,7 @@ try{const a=new (window.AudioContext||window.webkitAudioContext)(),sr=a.sampleRa
     src.connect(bp).connect(lp).connect(env).connect(target);src.start(t,R(0,3),duration+.01);
   };
   AUD={flicker,ctx:a,foley,voiceLP,puff};
+  void loadLevel0Audio(a);
   nextBreath=a.currentTime+1.5;nextCough=a.currentTime+R(18,32);
 }catch(e){console.warn('Audio unavailable',e)}}
 function footfalls(run){
@@ -462,9 +499,10 @@ function footfalls(run){
   if(t-lastFootstep<interval)return;
   lastFootstep=t;
   const v=(run?.22:.16)*(.83+Math.random()*.34);
-  AUD.puff(t,.11+Math.random()*.055,v,85,580);
-  // A second soft compression of the carpet, not a hard heel click.
-  AUD.puff(t+.055,.09,v*.38,100,400);
+  if(!playLevel0Sample('footsteps',t,run?.30:.24)){
+    AUD.puff(t,.11+Math.random()*.055,v,85,580);
+    AUD.puff(t+.055,.09,v*.38,100,400);
+  }
 }
 function breathe(){
   if(!AUD||!playing||AUD.ctx.state!=='running')return;
@@ -472,13 +510,16 @@ function breathe(){
   if(t>=nextBreath){
     const running=runAmt>.5;
     const duration=running?1.05:1.45;
-    AUD.puff(t,duration,running?.065:.038,160,1250,AUD.voiceLP);
+    if(!playLevel0Sample(running?'breathing_run':'breathing_idle',t,running?.32:.23))
+      AUD.puff(t,duration,running?.065:.038,160,1250,AUD.voiceLP);
     nextBreath=t+(running?2.25:3.8)+Math.random()*.55;
   }
   if(t>=nextCough){
     // Rare, soft double burst; the camera receives a matching short impulse.
-    AUD.puff(t,.17,.16,180,1800,AUD.voiceLP);
-    AUD.puff(t+.19,.21,.11,150,1500,AUD.voiceLP);
+    if(!playLevel0Sample('cough',t,.30)){
+      AUD.puff(t,.17,.16,180,1800,AUD.voiceLP);
+      AUD.puff(t+.19,.21,.11,150,1500,AUD.voiceLP);
+    }
     coughPulse=1;
     nextCough=t+65+Math.random()*145;
   }

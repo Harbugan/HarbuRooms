@@ -1,0 +1,3 @@
+# Level 0 audio replacement
+
+Place optional recordings in `assets/audio/level0/player/` using the filenames in `assets/audio/level0/manifest.json`. The game loads available audio on start and uses the existing synthesized sounds when files are missing. Supports OGG, MP3 and WAV. Edit the manifest to change filenames or per-category `gain` (0-2). Footsteps cycle through available recordings. Cough remains synchronized with the camera movement. Use short, isolated samples, then hard-refresh the browser. Fluorescent ambience remains synthesized in this version. No audio recordings are included in this PR.
