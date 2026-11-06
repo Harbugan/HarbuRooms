@@ -38,3 +38,13 @@ Status: **in review**, verified headless (software GL, no shader errors, bloom v
 * **F3 → FLUORESCENT BLOOM (REALISTIC ONLY):** enable, lamp HDR gain, lamp fog kept, threshold, intensity (default 25 %), spread. All live; saved in `nullrooms.dev`; global F3 reset restores defaults.
 * Defaults are visual hypotheses: tune in the browser first (intensity/gain), then bake into `DEV_DEFAULT`.
 * WebXR: bloom targets are screen-sized; a stereo path would need per-eye passes.
+
+## 4C.2 phase 2 — fog, exposure, shoulder, grade (REALISTIC profile only)
+Status: **in review**, verified headless only (no shader errors; ORIGINAL mean colour within ~1 % of `main` in a noisy software-GL frame, not a pixel diff). Needs a real-GPU look.
+
+* **Bloom defaults** now follow the in-browser tuning after phase 1: spread 96 %, intensity 28 %, lamp fog kept 36 %.
+* **Fog:** `scene.fog` colour/density are written live by `applyVisual()` (`FOG_BASE` = the original haze). REALISTIC defaults: colour brightness 65 % (distance goes darker instead of towards a bright yellow), density 100 %. `scene.background` follows the fog colour. ORIGINAL restores `HAZE` / `.027`.
+* **Post shader:** the grade constants of the old VHS look (`.78` saturation, `.92` gain, lift `vec3(.035,.03,.04)`, blue `.9`) are now uniforms (`uGrade`, `uBlue`). ORIGINAL sets exactly the old values; contrast, exposure and shoulder are neutral there and skipped by guards.
+* **Exposure** (`uExp`, linear, before grade) and a **highlight shoulder** (`uTone`, soft knee towards 1; 100 % = off) are new and default neutral.
+* **REALISTIC defaults (hypotheses):** saturation 90 %, blue gain 90 %, black lift 50 %, gain 92 % (= old), contrast 110 %, exposure 100 %, shoulder off.
+* **F3 → FOG, EXPOSURE & GRADE (REALISTIC ONLY):** nine sliders plus reset. All live, saved in `nullrooms.dev`, restored by the global F3 reset.
