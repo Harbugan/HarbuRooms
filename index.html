@@ -19,9 +19,9 @@ const camera=new THREE.PerspectiveCamera(78,innerWidth/innerHeight,.05,110);came
 const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
 // --- VHS post pass: scene renders into a half-float target, then a full-screen shader smears, wobbles, tints and vignettes it.
 let RES=.85;const rt=new THREE.WebGLRenderTarget(2,2,{type:THREE.HalfFloatType,samples:4,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
-const vhsMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tDiffuse:{value:rt.texture},time:{value:0},res:{value:new THREE.Vector2(1,1)},shake:{value:0},intensity:{value:.75},uReal:{value:0},uPost:{value:1},uGrain:{value:1},uVig:{value:1},uScan:{value:1},uHalo:{value:1},uCA:{value:1}},
+const vhsMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tDiffuse:{value:rt.texture},time:{value:0},res:{value:new THREE.Vector2(1,1)},shake:{value:0},intensity:{value:.75},uReal:{value:0},uPost:{value:1},uGrain:{value:1},uVig:{value:1},uScan:{value:1},uHalo:{value:1},uCA:{value:1},tBloom0:{value:null},tBloom1:{value:null},tBloom2:{value:null},uBloomOn:{value:0},uBloomW:{value:new THREE.Vector3()}},
 vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
-fragmentShader:`precision highp float;uniform sampler2D tDiffuse;uniform float time,shake,intensity,uReal,uPost,uGrain,uVig,uScan,uHalo,uCA;uniform vec2 res;varying vec2 vUv;
+fragmentShader:`precision highp float;uniform sampler2D tDiffuse;uniform float time,shake,intensity,uReal,uPost,uGrain,uVig,uScan,uHalo,uCA,uBloomOn;uniform sampler2D tBloom0,tBloom1,tBloom2;uniform vec3 uBloomW;uniform vec2 res;varying vec2 vUv;
 float h11(float x){return fract(sin(x*127.1)*43758.5453);}
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float n1(float x){float i=floor(x),f=fract(x);f=f*f*(3.-2.*f);return mix(h11(i),h11(i+1.),f);}
@@ -30,10 +30,12 @@ float n1(float x){float i=floor(x),f=fract(x);f=f*f*(3.-2.*f);return mix(h11(i),
 // exact sRGB OETF everywhere, so the bypass path and the graded path are in the same (encoded) space.
 vec3 srgbOetf(vec3 c){c=clamp(c,0.,1.);return mix(c*12.92,1.055*pow(c,vec3(1./2.4))-.055,step(.0031308,c));}
 vec3 enc(vec3 c){return uReal>.5?srgbOetf(c):pow(max(c,0.),vec3(1./2.2));}
+// REALISTIC only: lamps are HDR (>1) in tDiffuse. The existing smear/halation taps see them clamped to 1 (as before 4C.2); the new bloom pass carries the excess.
+vec4 T(vec2 p){vec4 c=texture2D(tDiffuse,p);return uReal>.5?min(c,vec4(1.)):c;}
 void main(){
   // post disabled: neutral, correctly encoded passthrough (skips every tap below)
   if(uPost<.5){gl_FragColor=vec4(srgbOetf(texture2D(tDiffuse,vUv).rgb),1.);return;}
-  vec2 uv=vUv;
+  vec2 uv=vUv;vec3 bl=vec3(0.);
   // slow tape wobble + head-switching noise along the bottom edge
   float bot=smoothstep(.07,0.,uv.y);
   float wob=sin(uv.y*16.+time*1.9)*.0007+sin(uv.y*3.+time*.7)*.0012+(n1(time*.6)-.5)*.0016;
@@ -49,12 +51,15 @@ void main(){
   float px=1./res.x,ca=px*(2.2+bot*8.+band*10.)*uCA;
   vec3 col=vec3(0.);float ws=0.;
   for(int k=-3;k<=3;k++){float w=exp(-float(k*k)*.22),o=float(k)*px*1.6;
-    col+=w*vec3(texture2D(tDiffuse,uv+vec2(o+ca,0.)).r,texture2D(tDiffuse,uv+vec2(o,0.)).g,texture2D(tDiffuse,uv+vec2(o-ca,0.)).b);ws+=w;}
+    col+=w*vec3(T(uv+vec2(o+ca,0.)).r,T(uv+vec2(o,0.)).g,T(uv+vec2(o-ca,0.)).b);ws+=w;}
   col=col/ws;
   // dreamy halation: wide soft blur of bright areas bleeds into the picture
   vec3 glow=vec3(0.);for(int k=0;k<16;k++){float a=float(k)*2.39996,r=sqrt(float(k)+.5)/4.;vec2 o=vec2(cos(a),sin(a))*r*vec2(res.y/res.x,1.)*.06;
-    vec3 c=texture2D(tDiffuse,uv+o).rgb;glow+=c*(1.-r*.6);}
+    vec3 c=T(uv+o).rgb;glow+=c*(1.-r*.6);}
   glow/=12.;col=mix(col,glow,.22*uHalo)+max(glow-.55,0.)*.55*uHalo;
+  // fluorescent bloom (REALISTIC, linear light, added before encoding): 3 blurred levels from bloomPass()
+  if(uBloomOn>.5&&uReal>.5)bl=texture2D(tBloom0,uv).rgb*uBloomW.x+texture2D(tBloom1,uv).rgb*uBloomW.y+texture2D(tBloom2,uv).rgb*uBloomW.z;
+  col+=bl;
   col=enc(col);
   // washed-out tape colour: desaturate, lift blacks, warm/magenta cast, soft highlight bloom
   float l=dot(col,vec3(.299,.587,.114));
@@ -73,9 +78,31 @@ void main(){
   vec2 q=(vUv-.5)*vec2(1.08,1.);float v=length(q)*1.35;
   col*=max(1.-smoothstep(.4,1.05,v)*.8*uVig,0.);
   col*=smoothstep(0.,.03,vUv.y)*.35+.65;
-  vec3 clean=texture2D(tDiffuse,vUv).rgb;if(uReal>.5)clean=srgbOetf(clean);col=mix(clean,col,intensity);gl_FragColor=vec4(col,1.);}`});
+  vec3 clean=texture2D(tDiffuse,vUv).rgb;if(uReal>.5)clean=srgbOetf(clean+bl);col=mix(clean,col,intensity);gl_FragColor=vec4(col,1.);}`});
 const postScene=new THREE.Scene(),postCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),vhsMat));
-function sizePost(){const pr=renderer.getPixelRatio();rt.setSize(Math.max(2,Math.round(innerWidth*pr*RES)),Math.max(2,Math.round(innerHeight*pr*RES)));vhsMat.uniforms.res.value.set(innerWidth*pr,innerHeight*pr)}sizePost();
+// --- Fluorescent bloom (4C.2 phase 1, REALISTIC profile only). Threshold on HDR lamps -> 1/4-res bright pass -> 3 gaussian levels
+// (1/4, 1/8, 1/16) summed in vhsMat. Half-float targets, no depth/MSAA; ~7 tiny passes, skipped entirely when off / ORIGINAL.
+const bloomT=[0,1,2].map(()=>({a:new THREE.WebGLRenderTarget(2,2,{type:THREE.HalfFloatType,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,depthBuffer:false}),b:new THREE.WebGLRenderTarget(2,2,{type:THREE.HalfFloatType,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,depthBuffer:false})}));
+vhsMat.uniforms.tBloom0.value=bloomT[0].a.texture;vhsMat.uniforms.tBloom1.value=bloomT[1].a.texture;vhsMat.uniforms.tBloom2.value=bloomT[2].a.texture;
+const bloomVS='varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}';
+const brightMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tSrc:{value:rt.texture},uTexel:{value:new THREE.Vector2(1,1)},uThr:{value:1}},vertexShader:bloomVS,
+fragmentShader:`precision highp float;uniform sampler2D tSrc;uniform vec2 uTexel;uniform float uThr;varying vec2 vUv;
+vec3 br(vec2 p){vec3 c=min(texture2D(tSrc,p).rgb,vec3(64.));float m=max(max(c.r,c.g),c.b);return c*(max(m-uThr,0.)/max(m,1e-4));}
+void main(){vec3 s=br(vUv+uTexel*vec2(-1.,-1.))+br(vUv+uTexel*vec2(1.,-1.))+br(vUv+uTexel*vec2(-1.,1.))+br(vUv+uTexel*vec2(1.,1.));gl_FragColor=vec4(s*.25,1.);}`});
+const blurMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tSrc:{value:null},uDir:{value:new THREE.Vector2(1,0)}},vertexShader:bloomVS,
+fragmentShader:`precision highp float;uniform sampler2D tSrc;uniform vec2 uDir;varying vec2 vUv;
+void main(){vec3 c=texture2D(tSrc,vUv).rgb*.227027;
+  c+=(texture2D(tSrc,vUv+uDir).rgb+texture2D(tSrc,vUv-uDir).rgb)*.194595;c+=(texture2D(tSrc,vUv+uDir*2.).rgb+texture2D(tSrc,vUv-uDir*2.).rgb)*.121622;
+  c+=(texture2D(tSrc,vUv+uDir*3.).rgb+texture2D(tSrc,vUv-uDir*3.).rgb)*.054054;c+=(texture2D(tSrc,vUv+uDir*4.).rgb+texture2D(tSrc,vUv-uDir*4.).rgb)*.016216;gl_FragColor=vec4(c,1.);}`});
+const bloomScene=new THREE.Scene(),bloomQuad=new THREE.Mesh(new THREE.PlaneGeometry(2,2),brightMat);bloomScene.add(bloomQuad);
+function bloomBlit(m,target){bloomQuad.material=m;renderer.setRenderTarget(target);renderer.render(bloomScene,postCam)}
+function bloomPass(){const u=vhsMat.uniforms,on=devValues.visProfile===1&&devValues.visPost&&Number(devValues.bloomOn)!==0&&u.uBloomW.value.lengthSq()>0;u.uBloomOn.value=on?1:0;if(!on)return;
+  brightMat.uniforms.uTexel.value.set(1/rt.width,1/rt.height);bloomBlit(brightMat,bloomT[0].a);
+  for(let i=0;i<3;i++){const src=bloomT[i?i-1:0].a,dst=bloomT[i];
+    blurMat.uniforms.tSrc.value=src.texture;blurMat.uniforms.uDir.value.set(1/dst.b.width,0);bloomBlit(blurMat,dst.b);
+    blurMat.uniforms.tSrc.value=dst.b.texture;blurMat.uniforms.uDir.value.set(0,1/dst.a.height);bloomBlit(blurMat,dst.a)}}
+function sizePost(){const pr=renderer.getPixelRatio();rt.setSize(Math.max(2,Math.round(innerWidth*pr*RES)),Math.max(2,Math.round(innerHeight*pr*RES)));vhsMat.uniforms.res.value.set(innerWidth*pr,innerHeight*pr);
+  bloomT.forEach((t,i)=>{const d=4<<i,w=Math.max(2,Math.round(rt.width/d)),h=Math.max(2,Math.round(rt.height/d));t.a.setSize(w,h);t.b.setSize(w,h)})}sizePost();
 // Lighting is baked into vertex colours (see Builder), so only cheap global lights are needed. No per-chunk PointLights.
 // Level 0 lighting model: ONE baked light source (ceiling-panel pools in vertex colours, see Builder.box) plus a soft
 // hemisphere fill that stands in for bounce light. There is deliberately no camera-attached light (no flashlight look).
@@ -336,6 +363,9 @@ const ceilTex=makeTex(512,512,33,(g,w,h,r)=>{g.fillStyle='#f3f0dc';g.fillRect(0,
     if(r()<.18){const x=x0+30+r()*(TW-60),y=y0+30+r()*(TH-60),rad=25+r()*35,gr=g.createRadialGradient(x,y,0,x,y,rad);gr.addColorStop(0,'rgba(140,105,30,.16)');gr.addColorStop(.85,'rgba(140,105,30,.10)');gr.addColorStop(1,'rgba(120,85,20,0)');g.fillStyle=gr;g.fillRect(x-rad,y-rad,rad*2,rad*2)}}
   grain(g,w,h,r,9)});
 const mat=map=>new THREE.MeshLambertMaterial({vertexColors:true,map}),wallMat=mat(wallTex),floorMat=mat(floorTex),ceilMat=mat(ceilTex),glowMat=new THREE.MeshBasicMaterial({vertexColors:true}),gridMat=new THREE.MeshLambertMaterial({vertexColors:true});
+// Lamp panels: uGlow = (HDR gain, fraction of fog kept). ORIGINAL keeps (1,1) = the old output exactly; REALISTIC sets it in applyVisual().
+const GLOW_U={value:new THREE.Vector2(1,1)};
+glowMat.onBeforeCompile=sh=>{sh.uniforms.uGlow=GLOW_U;sh.fragmentShader='uniform vec2 uGlow;\n'+sh.fragmentShader.replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb*=uGlow.x;').replace('#include <fog_fragment>','#ifdef USE_FOG\nfloat ff=1.0-exp(-fogDensity*fogDensity*vFogDepth*vFogDepth);gl_FragColor.rgb=mix(gl_FragColor.rgb,fogColor,ff*uGlow.y);\n#endif')};glowMat.customProgramCacheKey=()=>'glow-hdr';
 // --- Material system v0.2 (src/materials/level0.js, docs/MATERIALS.md). The Lambert materials above stay as the "legacy" baseline.
 // MATS is what chunk meshes are built with. ?materials=legacy starts on the original look; F8 toggles live (chunks are re-pointed, no rebuild).
 const MATS={wall:wallMat,floor:floorMat,ceil:ceilMat};let matSystem=null;
@@ -426,7 +456,7 @@ function drawMap(now){if(now-mapAt<250)return;mapAt=now;
 let hum,AUD=null,stepN=null,masterGain=null;
 let introDuck=1,lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
 const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100,introEnabled:1,introDuration:8,introFall:1,introShake:.35,introBreath:.25,introImpact:.5,introDuck:.6,envEnabled:1,envWear:8,envDamp:3,envCeil:2,envIntensity:25,envShow:0,
-  visProfile:0,visPost:1}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
+  visProfile:0,visPost:1,bloomOn:1,lampGain:4,lampFog:30,bloomThr:1,bloomInt:25,bloomSpread:50}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
 let devSaved={};try{devSaved=JSON.parse(localStorage.getItem('nullrooms.dev')||'{}')||{}}catch(e){}
 // VISUAL / RENDERING: one gain set per profile, so tuning Realistic never touches Original. Defaults are 100 % = the look the post shader always had.
 const VIS_FX=[['grain','Grain intensity','uGrain'],['vig','Vignette intensity','uVig'],['scan','Scanline intensity','uScan'],['halo','Halation intensity','uHalo'],['ca','Chromatic aberration','uCA']];
@@ -436,6 +466,8 @@ function devScale(k){return Math.max(0,Math.min(200,Number(devValues[k])||0))/10
 // Live apply: only uniform writes (no shader recompilation, no render-target change, no world rebuild).
 function visPrefix(){return devValues.visProfile===1?'visR_':'visO_'}
 function applyVisual(){const u=vhsMat.uniforms,pre=visPrefix();u.uReal.value=devValues.visProfile===1?1:0;u.uPost.value=devValues.visPost?1:0;
+  {const R=devValues.visProfile===1,bv=(k,d)=>{const v=Number(devValues[k]);return Number.isFinite(v)?v:d},sp=bv('bloomSpread',50)/100,I=bv('bloomInt',25)/100;
+   GLOW_U.value.set(R?bv('lampGain',4):1,R?bv('lampFog',30)/100:1);brightMat.uniforms.uThr.value=bv('bloomThr',1);u.uBloomW.value.set(I*(.2+.6*(1-sp)),I*.5,I*(.2+.6*sp))}
   for(const [k,,uni] of VIS_FX){const v=Number(devValues[pre+k]);u[uni].value=(Number.isFinite(v)?Math.max(0,Math.min(200,v)):100)/100}}
 applyVisual();
 function applyDevGains(){if(!devGains)return;for(const k of ['hum','footsteps','breathing','cough'])devGains[k].gain.value=devScale(k)*(k==='hum'?introDuck:1);devGains.reverb.gain.value=.09*devScale('reverb')}
@@ -822,6 +854,17 @@ function setVisProfile(p){devValues.visProfile=p?1:0;applyVisual();visSave();dev
   input.oninput=()=>{devValues[visPrefix()+k]=Number(input.value);applyVisual();visSave();sync()};
   row.append(cap,input,out);devControls.append(row)}
  const rb=document.createElement('button');rb.textContent='RESET THIS PROFILE';rb.onclick=()=>{for(const [k] of VIS_FX)devValues[visPrefix()+k]=100;applyVisual();visSave();devSync.forEach(fn=>fn())};devControls.append(rb)}
+// FLUORESCENT BLOOM (4C.2 phase 1): REALISTIC profile only (ORIGINAL ignores all of these). All live: uniform writes only, no chunk rebuild.
+const BLOOM_CFG=[['lampGain','Lamp HDR gain (x white)',1,12,.25,2,'x'],['lampFog','Lamp fog kept (0 = lamps ignore fog)',0,100,1,0,'%'],['bloomThr','Bloom threshold (linear)',.5,3,.05,2,''],['bloomInt','Bloom intensity',0,100,1,0,'%'],['bloomSpread','Bloom spread (tight <-> wide)',0,100,1,0,'%']];
+{const h=document.createElement('h3');h.textContent='FLUORESCENT BLOOM (REALISTIC ONLY)';devControls.append(h);
+ const save=()=>{applyVisual();visSave()},bv=k=>{const v=Number(devValues[k]);return Number.isFinite(v)?v:DEV_DEFAULT[k]};
+ const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';en.append(cb,' Bloom enabled');
+ cb.onchange=()=>{devValues.bloomOn=cb.checked?1:0;save()};devSync.push(()=>{cb.checked=!!Number(devValues.bloomOn)});cb.checked=!!Number(devValues.bloomOn);devControls.append(en);
+ for(const [key,label,min,max,step,dec,suffix] of BLOOM_CFG){const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output');
+  cap.textContent=label;input.type='range';input.min=min;input.max=max;input.step=step;
+  const sync=()=>{input.value=bv(key);out.textContent=bv(key).toFixed(dec)+suffix};devSync.push(sync);sync();
+  input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};row.append(cap,input,out);devControls.append(row)}
+ const rb=document.createElement('button');rb.textContent='RESET BLOOM / LAMPS';rb.onclick=()=>{for(const [k] of BLOOM_CFG)devValues[k]=DEV_DEFAULT[k];devValues.bloomOn=1;save();devSync.forEach(fn=>fn())};devControls.append(rb)}
 addEventListener('keydown',e=>{if(e.code==='F4'){e.preventDefault();setVisProfile(devValues.visProfile?0:1)}});
 const devPadInvert=document.querySelector('#devPadInvert');devSync.push(()=>{devPadInvert.checked=!!settings.padInvertY});devPadInvert.onchange=()=>{settings.padInvertY=devPadInvert.checked;applySettings();document.getElementById('padInvertY').checked=settings.padInvertY};
 function devRefresh(){devSync.forEach(fn=>fn());document.querySelector('#devStatus').textContent='Audio: '+(AUD?.ctx.state||'not started')+' | '+['footsteps','breathing_idle','cough'].map(k=>k+': '+(audioBuffers[k]?.length?'file':'fallback')).join(' / ')}
@@ -860,5 +903,5 @@ function handheld(now,dt,moving,running){const t=now/1000;moveAmt+=((moving?1:0)
   const f=settings.fov+(settings.bob?Math.sin(t*.4)*.8+Math.sin(t*1.3)*.4-runAmt*3-jolt*1.5:0);if(Math.abs(camera.fov-f)>.01){camera.fov=f;camera.updateProjectionMatrix()}
   vhsMat.uniforms.shake.value=jolt+runAmt*.5+coughPulse*.18}
 let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;pollGamepad(dt);const run=keys.has('ShiftLeft')||keys.has('ShiftRight')||padState.sprint;if(devOpen&&now-padDevAt>100){padDevAt=now;document.querySelector('#devPad').textContent=padDebugText(now)}if(playing&&!intro.active){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'))+padState.my;const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'))+padState.mx;if(f||s){const len=Math.hypot(f,s),speed=(run?4.6:2.5)*Math.min(1,len)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(run?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(run)}else {lastFootstep=0;camera.position.y+=(1.7-camera.position.y)*.12}}updateChunks();if(DBG_MAP)drawMap(now);ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&!intro.active&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight')||padState.mx!==0||padState.my!==0);handheld(now,dt,mv,mv&&(run));introTick(dt);breathe();
-vhsMat.uniforms.time.value=now/1000%1000;renderer.setRenderTarget(rt);renderer.render(scene,camera);renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();while(queue.length)updateChunks();{const [x,z]=findSpawn();camera.position.set(x,1.7,z)}requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
+vhsMat.uniforms.time.value=now/1000%1000;renderer.setRenderTarget(rt);renderer.render(scene,camera);bloomPass();renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();while(queue.length)updateChunks();{const [x,z]=findSpawn();camera.position.set(x,1.7,z)}requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
 </script></body></html>
