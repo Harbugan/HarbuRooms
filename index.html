@@ -249,9 +249,20 @@ function layoutLegacy(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L)r
 //     extra doors (loops). Then the odd missing wall, interior window, wide breach in a very long wall, and free-standing partition.
 const RS=48,regCache=new Map(),xoff=rz=>N*Math.floor(hash(rz,0,900)*(RS/N));
 const regionAt=(cx,cz)=>{const rz=Math.floor(cz*N/RS);return [Math.floor((cx*N-xoff(rz))/RS),rz]};
+// Region epochs (docs/WORLDGEN.md, "Region epochs"). A region's rooms, doors, partitions and lamp states are seeded by (rx, rz, epoch).
+// Epoch 0 = the original world, bit-identical to before epochs existed (es() leaves the seed untouched). Zones, palettes, ceiling
+// heights, corridors and chunk-border openings stay epoch-independent. A chunk's layout depends only on its OWN region's epoch, so
+// changing an epoch is safe once that region and a 1-chunk ring around it hold no built chunk (dependency radius of addChunk = 1).
+// Caches are self-invalidating: region() and layout() rebuild when the stored epoch differs. Nothing changes an epoch yet.
+const regEpoch=new Map(),regionEpoch=(rx,rz)=>regEpoch.get(rx+','+rz)||0,es=(s,e)=>e?s+0x10000*(e&0x7fff):s;
+// Fixed start area: every region that holds a chunk within START_PIN chunks of the spawn chunk (0,0) keeps epoch 0 forever, so the
+// start (and the start-room decal) is always the same place. setRegionEpoch() refuses those regions and returns false.
+const START_PIN=2;let pinSet=null;
+const isPinnedRegion=(rx,rz)=>{if(!pinSet){pinSet=new Set();for(let a=-START_PIN;a<=START_PIN;a++)for(let b=-START_PIN;b<=START_PIN;b++)pinSet.add(regionAt(a,b).join())}return pinSet.has(rx+','+rz)};
+function setRegionEpoch(rx,rz,e){e=Math.max(0,Math.floor(e)||0)&0x7fff;const id=rx+','+rz;if(isPinnedRegion(rx,rz))return false;if(e)regEpoch.set(id,e);else regEpoch.delete(id);return true}
 const roomParams=I=>I.kind==='maze'?{m:2,g:2,T:7,big:.04,extra:.18}:I.kind==='closets'?{m:2,g:2,T:5,big:0,extra:.5}:{m:3,g:4,T:18+Math.max(0,.68-I.n)/.36*52,big:.12,extra:.3};
-function region(rx,rz){const id=rx+','+rz;let R=regCache.get(id);if(R)return R;
-  const S=RS,ox=rx*S+xoff(rz),oz=rz*S,r=rng(rx,rz,1000),lab=new Int16Array(S*S),cinfo=(x,z)=>info(Math.floor((ox+x)/N),Math.floor((oz+z)/N));
+function region(rx,rz){const id=rx+','+rz,ep=regionEpoch(rx,rz);let R=regCache.get(id);if(R&&R.ep===ep)return R;
+  const S=RS,ox=rx*S+xoff(rz),oz=rz*S,r=rng(rx,rz,es(1000,ep)),lab=new Int16Array(S*S),cinfo=(x,z)=>info(Math.floor((ox+x)/N),Math.floor((oz+z)/N));
   const rects=[];let nid=1;
   function par(x0,z0,x1,z1){let T=1e9,m=9,g=4,any=false;
     for(let cz=Math.floor((oz+z0)/N);cz<=Math.floor((oz+z1-1)/N);cz++)for(let cx=Math.floor((ox+x0)/N);cx<=Math.floor((ox+x1-1)/N);cx++){const I=info(cx,cz);if(I.open)continue;any=true;const p=roomParams(I);T=Math.min(T,p.T);m=Math.min(m,p.m);g=Math.min(g,p.g)}
@@ -286,7 +297,7 @@ function region(rx,rz){const id=rx+','+rz;let R=regCache.get(id);if(R)return R;
   const hw=new Uint8Array((S+1)*S),vw=new Uint8Array((S+1)*S),lint=[];
   for(let z=1;z<S;z++)for(let x=0;x<S;x++)hw[z*S+x]=cm[(z-1)*S+x]!==cm[z*S+x]?1:0;
   for(let x=1;x<S;x++)for(let z=0;z<S;z++)vw[x*S+z]=cm[z*S+x-1]!==cm[z*S+x]?1:0;
-  const edge=d=>{const e=rng(rx,rz,1100+d),o=new Uint8Array(S);let pos=0,op=e()<.5;while(pos<S){const len=3+Math.floor(e()*(op?7:8)),end=Math.min(S,pos+len);if(op)for(let i=pos;i<end;i++)o[i]=1;pos=end;op=!op}
+  const edge=d=>{const e=rng(rx,rz,es(1100+d,ep)),o=new Uint8Array(S);let pos=0,op=e()<.5;while(pos<S){const len=3+Math.floor(e()*(op?7:8)),end=Math.min(S,pos+len);if(op)for(let i=pos;i<end;i++)o[i]=1;pos=end;op=!op}
     if(!o.some(v=>v))for(let i=9;i<13;i++)o[i]=1;return o};
   {const a=edge(0),b=edge(1);for(let i=0;i<S;i++){hw[i]=a[i]^1;vw[i]=b[i]^1}}
   const scan=()=>{const out=[];for(let ax=0;ax<2;ax++){const arr=ax?vw:hw;for(let line=1;line<S;line++){let cur=null;
@@ -316,7 +327,33 @@ function region(rx,rz){const id=rx+','+rz;let R=regCache.get(id);if(R)return R;
     for(let z=z0;z<z1&&same;z++)for(let x=x0;x<x1;x++)if(cm[z*S+x]!==c0){same=false;break}
     const vert=r()<.5,ln=vert?x0+3+Math.floor(r()*(x1-x0-5)):z0+3+Math.floor(r()*(z1-z0-5));
     if(same){if(vert){for(let z=z0+2;z<z1-2;z++)vw[ln*S+z]=1}else for(let x=x0+2;x<x1-2;x++)hw[ln*S+x]=1}}
-  R={ox,oz,hw,vw,cm,cobst,lint};regCache.set(id,R);return R}
+  // Walkability (docs/WORLDGEN.md, "Walkability repair"). A room is a set of connected cells, but it can have a 1-cell neck: 1 m
+  // between two wall ends is 0.7 m clear, narrower than the player (0.74 m), so the door tree above can believe rooms are joined
+  // when they are not. Flood the region the way the player walks: an open edge counts only if its open stretch on that line,
+  // between wall ends (walls along the line or touching it from either side), is >= 2 cells. Every cut-off part is then joined to
+  // another one with a 2-cell door. Only removes walls, so it never breaks anything; regions without a defect are left untouched.
+  // Parts without a 2 x 2 block of cells are nooks the player cannot stand in anyway (0.7 m clear) and are ignored.
+  // The region's S/E border lines belong to the neighbours and are assumed to be wall here (conservative).
+  {const wl=(ax,l,i)=>l>=S||i<0||i>=S?1:(ax?vw:hw)[l*S+i],pp=(ax,l,k)=>!!(wl(1-ax,k,l-1)||wl(1-ax,k,l)),P=[new Uint8Array(S*S),new Uint8Array(S*S)];
+    for(let guard=0;guard<8;guard++){
+      // P[ax][l*S+i] = 1: crossing line l at cell i is walkable (open, and its open stretch between wall ends is >= 2 cells)
+      for(let ax=0;ax<2;ax++){const A=P[ax];A.fill(0);for(let l=1;l<S;l++)for(let i=0;i<S;){if(wl(ax,l,i)){i++;continue}let j=i+1;while(j<S&&!wl(ax,l,j)&&!pp(ax,l,j))j++;if(j-i>=2)A.fill(1,l*S+i,l*S+j);i=j}}
+      const comp=new Int32Array(S*S).fill(-1),big=[];let nc=0;
+      for(let s=0;s<S*S;s++){if(comp[s]>=0)continue;comp[s]=nc;const st=[s];
+        while(st.length){const p=st.pop(),x=p%S,z=(p-x)/S;
+          if(x<S-1&&P[1][(x+1)*S+z]&&comp[p+1]<0){comp[p+1]=nc;st.push(p+1)}if(x>0&&P[1][x*S+z]&&comp[p-1]<0){comp[p-1]=nc;st.push(p-1)}
+          if(z<S-1&&P[0][(z+1)*S+x]&&comp[p+S]<0){comp[p+S]=nc;st.push(p+S)}if(z>0&&P[0][z*S+x]&&comp[p-S]<0){comp[p-S]=nc;st.push(p-S)}}
+        nc++}
+      for(let z=0;z<S-1;z++)for(let x=0;x<S-1;x++){const c=comp[z*S+x];if(c===comp[z*S+x+1]&&c===comp[z*S+x+S]&&c===comp[z*S+x+S+1])big[c]=1}
+      if(big.filter(Boolean).length<2)break;
+      // candidate doors: two wall cells on one line, the same part on each side, no wall touching the vertex between them
+      const cand=[];for(let ax=0;ax<2;ax++)for(let l=1;l<S;l++)for(let i=0;i<S-1;i++){if(wl(ax,l,i)!==1||wl(ax,l,i+1)!==1||pp(ax,l,i+1))continue;
+        const c=(u,v)=>ax?comp[v*S+u]:comp[u*S+v],a=c(l-1,i),b=c(l,i);if(a!==b&&big[a]&&big[b]&&a===c(l-1,i+1)&&b===c(l,i+1))cand.push([ax,l,i,a,b])}
+      if(!cand.length)break;
+      for(let i=cand.length-1;i>0;i--){const j=Math.floor(r()*(i+1)),t=cand[i];cand[i]=cand[j];cand[j]=t}
+      const up=new Int32Array(nc).map((_,i)=>i),find=a=>{while(up[a]!==a)a=up[a]=up[up[a]];return a};
+      for(const [ax,l,i,a,b] of cand){const fa=find(a),fb=find(b);if(fa===fb)continue;up[fa]=fb;const arr=ax?vw:hw;arr[l*S+i]=arr[l*S+i+1]=0;if(r()<.65)lint.push([ax,l,i,i+2])}}}
+  R={ox,oz,hw,vw,cm,cobst,lint,ep};regCache.set(id,R);return R}
 function layoutNew(cx,cz){const I=info(cx,cz),[rx,rz]=regionAt(cx,cz),R=region(rx,rz),S=RS,lx0=cx*N-R.ox,lz0=cz*N-R.oz,
     hw=new Uint8Array((N+1)*N),vw=new Uint8Array((N+1)*N),lab=new Int16Array(N*N),pillars=[],lint=[],
     E=[edgeOpen(0,cx,cz,1),edgeOpen(1,cx,cz,1),edgeOpen(0,cx,cz+1,1),edgeOpen(1,cx+1,cz,1)];
@@ -332,12 +369,56 @@ function layoutNew(cx,cz){const I=info(cx,cz),[rx,rz]=regionAt(cx,cz),R=region(r
   for(const [ax,line,a,b] of R.lint){const l=ax?line-lx0:line-lz0,o=ax?lz0:lx0;if(l<0||l>=N)continue;const arr=ax?vw:hw;
     for(let i=Math.max(a,o);i<Math.min(b,o+N);){if(arr[l*N+i-o]){i++;continue}let j=i;while(j<Math.min(b,o+N)&&!arr[l*N+j-o])j++;lint.push([ax,l,i-o,j-o]);i=j}}
   const lights=[],roomOff=new Map();
-  for(let i=0;i<4;i++)for(let j=0;j<4;j++){const lx=1+4*i,lz=1+4*j,c=lab[lz*N+lx],h=hash(cx*4+i,cz*4+j,620),ob=R.cobst[c],key=ob?0:c;
-    if(!roomOff.has(key))roomOff.set(key,hash(ob?cx*64:rx*5003+c,ob?cz:rz+777,610)<.07);
+  for(let i=0;i<4;i++)for(let j=0;j<4;j++){const lx=1+4*i,lz=1+4*j,c=lab[lz*N+lx],h=hash(cx*4+i,cz*4+j,es(620,R.ep)),ob=R.cobst[c],key=ob?0:c;
+    if(!roomOff.has(key))roomOff.set(key,hash(ob?cx*64:rx*5003+c,ob?cz:rz+777,es(610,R.ep))<.07);
     let k=.5,col=0xfffaec;if(I.sp==='dark'?h<.9:(h<.07||roomOff.get(key))){k=0;col=0x76756a}else if(I.sp==='dark'||h<.16){k=.12;col=0xb4b2a2}
     lights.push({x:cx*N+lx+.25,y:I.Hc-.05,z:cz*N+lz+.5,k,c:col})}
-  return {I,E,hw,vw,lint,pillars,lights}}
-function layout(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L)return L;L=GEN_LEGACY?layoutLegacy(cx,cz):layoutNew(cx,cz);layoutCache.set(id,L);return L}
+  return {I,E,hw,vw,lint,pillars,lights,ep:R.ep}}
+function layout(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L&&(GEN_LEGACY||L.ep===regionEpoch(...regionAt(cx,cz))))return L;L=GEN_LEGACY?layoutLegacy(cx,cz):layoutNew(cx,cz);layoutCache.set(id,L);return L}
+// Region retirement (docs/WORLDGEN.md, "Region retirement"). The chunks of a region: 3 x 3, from its origin (pure, no region build).
+const regionChunks=(rx,rz)=>{const cx0=(rx*RS+xoff(rz))/N,cz0=rz*RS/N,out=[];for(let b=0;b<RS/N;b++)for(let a=0;a<RS/N;a++)out.push([cx0+a,cz0+b]);return out};
+// Tracks regions that have had a built chunk and decides when one may be rebuilt with a new epoch ("retirable"):
+//  * not pinned (start area);
+//  * neither the region nor a one-chunk ring around it holds a built or queued chunk (busy(cx,cz)) - the dependency radius of a
+//    built chunk is one chunk, so no built chunk can ever see the change;
+//  * its nearest chunk is at least `dist` chunks (Chebyshev) from the player's chunk, and both have held for `delay` seconds.
+// Returning to it (a ring chunk gets built) resets the timer. update() returns the regions that became retirable on this call;
+// the caller decides what to do (dry run: log only; later: bump the epoch and forget()). Entries are capped at `cap`.
+function regenTracker(cap=512){const T=new Map();
+  return {T,
+    seen(cx,cz){const [rx,rz]=regionAt(cx,cz);if(isPinnedRegion(rx,rz))return;const id=rx+','+rz;let e=T.get(id);
+      if(!e){T.set(id,e={rx,rz,since:-1,ret:false});if(T.size>cap)for(const [k,v] of T)if(v.ret||T.size>cap*2){T.delete(k);if(T.size<=cap)break}}e.since=-1;e.ret=false},
+    forget(rx,rz){T.delete(rx+','+rz)},
+    reset(){for(const e of T.values()){e.since=-1;e.ret=false}}, // re-evaluate everything (e.g. after switching dry run -> apply)
+    update(now,pcx,pcz,busy,dist,delay){const out=[];
+      for(const e of T.values()){const ch=regionChunks(e.rx,e.rz);let d=1e9,b=false;
+        for(const [x,z] of ch)d=Math.min(d,Math.max(Math.abs(x-pcx),Math.abs(z-pcz)));
+        if(d>=dist){const x0=ch[0][0]-1,z0=ch[0][1]-1,n=RS/N+2;for(let j=0;j<n&&!b;j++)for(let i=0;i<n;i++)if(busy(x0+i,z0+j)){b=true;break}}
+        if(d<dist||b){e.since=-1;e.ret=false;continue}
+        if(e.since<0)e.since=now;if(!e.ret&&now-e.since>=delay){e.ret=true;out.push({rx:e.rx,rz:e.rz,epoch:regionEpoch(e.rx,e.rz),dist:d})}}
+      return out},
+    stats(){let u=0,r=0;for(const e of T.values()){if(e.ret)r++;else if(e.since>=0)u++}return {tracked:T.size,waiting:u,retirable:r}}}}
+// Start-room mark (docs/WORLDGEN.md, "Start area"): where the painted decal goes. Pure and deterministic (the start regions are
+// pinned to epoch 0). The spawn room is the region room under SPAWN_CELL; candidates are 2-cell stretches of full-height wall
+// (no window) facing into that room, with no wall touching the middle vertex from the room side, seen from the spawn without a wall
+// in between. Best = facing the spawn and about START_MARK_DIST m away. Returns null with ?gen=legacy (no region rooms there).
+const SPAWN_CELL=[8,8],START_MARK_DIST=4;let startMarkCache;
+function startMark(){if(startMarkCache!==undefined)return startMarkCache;startMarkCache=null;if(GEN_LEGACY)return null;
+  const wv=(ax,line,i)=>{const gx=ax?line:i,gz=ax?i:line,cx=Math.floor(gx/N),cz=Math.floor(gz/N),L=layout(cx,cz);return ax?L.vw[(gx-cx*N)*N+gz-cz*N]:L.hw[(gz-cz*N)*N+gx-cx*N]};
+  const room=(x,z)=>{const [rx,rz]=regionAt(Math.floor(x/N),Math.floor(z/N)),R=region(rx,rz),lx=x-R.ox,lz=z-R.oz;return rx+','+rz+','+R.cm[lz*RS+lx]};
+  const [sx,sz]=SPAWN_CELL,home=room(sx,sz),px=sx+.5,pz=sz+.5;
+  const blocked=(x,z)=>{const gx=Math.round(x),gz=Math.round(z);return (Math.abs(x-gx)<.16&&wv(1,gx,Math.floor(z)))||(Math.abs(z-gz)<.16&&wv(0,gz,Math.floor(x)))};
+  let best=null;
+  for(let z=sz-12;z<=sz+12;z++)for(let x=sx-12;x<=sx+12;x++){if(room(x,z)!==home)continue;
+    // faces of cell (x,z): [ax, line, along, normal into the room, the cell next along the line]
+    for(const [ax,line,i,nx,nz,ox,oz] of [[0,z,x,0,1,1,0],[0,z+1,x,0,-1,1,0],[1,x,z,1,0,0,1],[1,x+1,z,-1,0,0,1]]){
+      if(wv(ax,line,i)!==1||wv(ax,line,i+1)!==1||room(x+ox,z+oz)!==home)continue;
+      const k=i+1,side=ax?(nx>0?line:line-1):(nz>0?line:line-1);if(wv(1-ax,k,side))continue; // wall touching the middle vertex on the room side
+      const fx=ax?line+nx*.15:k,fz=ax?k:line+nz*.15,dx=px-fx,dz=pz-fz,d=Math.hypot(dx,dz),face=(dx*nx+dz*nz)/d;if(face<.3||d<1.5)continue;
+      let vis=true;for(let t=.3;t<d-.3&&vis;t+=.1)if(blocked(px-dx/d*t,pz-dz/d*t))vis=false;if(!vis)continue;
+      const score=face*Math.exp(-(((d-START_MARK_DIST)/2.5)**2));if(!best||score>best.score+1e-9)best={score,ax,line,k,nx,nz,x:fx,z:fz,d}}}
+  if(best)startMarkCache={x:best.x,z:best.z,nx:best.nx,nz:best.nz,chunk:Math.floor((best.x+best.nx*.01)/N)+','+Math.floor((best.z+best.nz*.01)/N),ax:best.ax,line:best.line,k:best.k,dist:+best.d.toFixed(2)};
+  return startMarkCache}
 // --- GEN END
 // Shared materials: Lambert + vertex colours is far cheaper than Standard; "glow" panels ignore lighting.
 // Procedural canvas textures (no asset files). Kept near-white so the palette colours (vertex colours) tint them.
@@ -399,6 +480,8 @@ try{const {createLevel0Materials}=await import('./src/materials/level0.js'),q=ne
   matSystem=createLevel0Materials(THREE,{renderer,H,aoUniforms:AO_U,ceilSize:[CEIL_W,CEIL_L],legacy:{wall:wallMat,floor:floorMat,ceil:ceilMat},procedural:{wall:wallTex,floor:floorTex,ceil:ceilTex},mode:q.get('materials'),manifestUrl:q.get('materialManifest')||undefined,
     onModeChange:active=>Object.assign(MATS,active)});Object.assign(MATS,matSystem.active);window.NULLROOMS_MATERIALS=matSystem;
 }catch(e){console.warn('Material system unavailable; using legacy materials',e)}
+// Baked light level of a point: base + ceiling-panel pools, through the shoulder, times the zone dim (docs/LIGHTING.md).
+function bakeLevel(lights,px,py,pz,kind,dim){let s=LIGHT.base[kind]??LIGHT.base.ceil;for(const L of lights){const dx=px-L.x,dy=py-L.y,dz=pz-L.z,q=dx*dx+dy*dy+dz*dz,w=1-q/(LIGHT.reach*LIGHT.reach);if(w>0)s+=LIGHT.gain*L.k*w*w/(1+q/LIGHT.soft)}return shoulder(s)*dim}
 const _box=new THREE.BoxGeometry(1,1,1),BP=_box.attributes.position.array,BN=_box.attributes.normal.array,BI=_box.index.array,_c=new THREE.Color();
 // Merges all boxes of a chunk into one lit + one glow geometry, baking ceiling-light pools into vertex colours.
 class Builder{
@@ -408,7 +491,7 @@ class Builder{
   box(x,y,z,w,h,d,color,collide=false,kind='wall',vs=1/H,vo=0){
     const b=this.b[kind],glow=kind==='glow',base=b.p.length/3;_c.set(color);
     for(let v=0;v<24;v++){const nx=BN[v*3],ny=BN[v*3+1],px=BP[v*3]*w+x,py=BP[v*3+1]*h+y,pz=BP[v*3+2]*d+z;b.p.push(px,py,pz);b.n.push(nx,ny,BN[v*3+2]);
-      let s=1;if(!glow){s=LIGHT.base[kind]??LIGHT.base.ceil;for(const L of this.lights){const dx=px-L.x,dy=py-L.y,dz=pz-L.z,q=dx*dx+dy*dy+dz*dz,w=1-q/(LIGHT.reach*LIGHT.reach);if(w>0)s+=LIGHT.gain*L.k*w*w/(1+q/LIGHT.soft)}s=shoulder(s)*this.dim}
+      const s=glow?1:bakeLevel(this.lights,px,py,pz,kind,this.dim);
       b.c.push(_c.r*s,_c.g*s,_c.b*s);b.h.push(this.Hc);b.l.push(s); // h = ceiling height of this chunk (AO); l = light level alone (no palette hue), used by external textures
       if(kind==='wall'){const vv=py*vs+vo;if(Math.abs(nx)>.5)b.u.push(pz/2,vv);else if(Math.abs(ny)>.5)b.u.push(px/2,pz/2);else b.u.push(px/2,vv)}else b.u.push(px/2,pz/2)}
     for(let i=0;i<36;i++)b.i.push(BI[i]+base);
@@ -425,7 +508,25 @@ function wallRun(B,ax,line,a,b,h,v,color,ox,oz,ea=true,eb=true){const t=.3,s=a-(
   for(let i=0;i<n;i++){const m=s+st*(i+.5),x=ax?ox+line:ox+m,z=ax?oz+m:oz+line,w=ax?t:st,d=ax?st:t;
     if(v===2){slab(B,x,z,w,d,0,1.05,color);slab(B,x,z,w,d,2.05,h,color)}else slab(B,x,z,w,d,0,h,color)}
   const m=(s+e)/2;B.walls.push(ax?{x:ox+line,z:oz+m,w:t,d:e-s}:{x:ox+m,z:oz+line,w:e-s,d:t})}
-function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const L=layout(cx,cz),I=L.I,p=I.pal,ox=cx*N,oz=cz*N,Hc=I.Hc,wall=p.wall;
+// --- Start-room decal (docs/WORLDGEN.md, "Start area"): the supplied painting (assets/decals/start_window.webp, used as is) on the wall
+// chosen by startMark(). One small quad in the chunk that holds it, one shared material: Lambert like the legacy walls, tinted by the
+// baked light level at its vertices (bakeLevel), fogged, alpha-blended over the wallpaper. No collision. F3 "START ROOM" tunes it live.
+const START_DECAL=startMark(),DECAL_ASPECT=1441/1881;let decal=null;
+const decalMat=new THREE.MeshLambertMaterial({transparent:true,vertexColors:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-4});
+new THREE.TextureLoader().load('assets/decals/start_window.webp',t=>{t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=renderer.capabilities.getMaxAnisotropy();decalMat.map=t;decalMat.needsUpdate=true;applyDecal()},
+  undefined,e=>console.warn('[decal] start_window.webp not found; start-room decal hidden',e));
+const decalVal=k=>{const v=Number(devValues[k]);return Number.isFinite(v)?v:DEV_DEFAULT[k]};
+function decalGeometry(){const M=START_DECAL,h=decalVal('decalH')/100,w=h*DECAL_ASPECT,yc=Math.min(decalVal('decalY')/100,H-h/2-.05),rx=M.nz,rz=-M.nx,o=.155,n=4,
+    p=[],nr=[],c=[],u=[],ix=[]; // 4 x 4 vertices so the baked light can vary across it
+  for(let j=0;j<n;j++)for(let i=0;i<n;i++){const a=i/(n-1),b=j/(n-1),x=M.x+M.nx*(o-.15)+rx*(a-.5)*w,y=yc+(b-.5)*h,z=M.z+M.nz*(o-.15)+rz*(a-.5)*w;
+    p.push(x,y,z);nr.push(M.nx,0,M.nz);const l=bakeLevel(decal.lights,x,y,z,'wall',decal.dim);c.push(l,l,l);u.push(a,b)}
+  for(let j=0;j<n-1;j++)for(let i=0;i<n-1;i++){const k=j*n+i;ix.push(k,k+1,k+n,k+1,k+n+1,k+n)}
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(nr,3));
+  g.setAttribute('color',new THREE.Float32BufferAttribute(c,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(u,2));g.setIndex(ix);g.computeBoundingSphere();return g}
+function decalAttach(g,lights,dim){decal={group:g,lights,dim,mesh:null};const m=new THREE.Mesh(decalGeometry(),decalMat);m.matrixAutoUpdate=false;m.renderOrder=1;decal.mesh=m;g.add(m);applyDecal()}
+function applyDecal(){decalMat.opacity=decalVal('decalOpacity')/100;decalMat.color.setScalar(decalVal('decalGain')/100);
+  if(!decal)return;const geo=decalGeometry();decal.mesh.geometry.dispose();decal.mesh.geometry=geo;decal.mesh.visible=!!decalMat.map&&Number(devValues.decalOn)!==0}
+function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;regen.seen(cx,cz);const L=layout(cx,cz),I=L.I,p=I.pal,ox=cx*N,oz=cz*N,Hc=I.Hc,wall=p.wall;
   // Baked light comes from this chunk's panels and any neighbouring panel close enough to reach in.
   const lights=[];for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++)for(const l of layout(cx+a,cz+b).lights)if(l.k>0&&l.x>ox-8&&l.x<ox+N+8&&l.z>oz-8&&l.z<oz+N+8)lights.push(l);
   const B=new Builder(lights,I.sp==='dark'?LIGHT.dark:1);B.Hc=Hc;
@@ -447,10 +548,22 @@ function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const L=lay
    for(let k=0;k<N/CEIL_W;k++)for(let s=0;s<N;s+=2)B.box(ox+k*CEIL_W,gy,oz+s+1,gw,gh,2,gc,false,'grid');
    for(let k=0;k<N/CEIL_L;k++)for(let s=0;s<N;s+=2)B.box(ox+s+1,gy,oz+k*CEIL_L,2,gh,gw,gc,false,'grid')}
   occRects.set(id,[...B.walls.map(w=>({...w,f:1})),...lint.map(([ax,line,a,b])=>{const m=(a+b)/2,l=b-a;return ax?{x:ox+line,z:oz+m,w:.3,d:l,f:0}:{x:ox+m,z:oz+line,w:l,d:.3,f:0}})]);occMark(cx,cz);
-  const g=new THREE.Group();g.userData.walls=B.walls;for(const m of [B.mesh(B.b.wall,MATS.wall),B.mesh(B.b.floor,MATS.floor),B.mesh(B.b.ceil,MATS.ceil),B.mesh(B.b.glow,glowMat),B.mesh(B.b.grid,gridMat)])if(m){m.updateMatrix();g.add(m)}
+  const g=new THREE.Group();g.userData.walls=B.walls;if(START_DECAL&&START_DECAL.chunk===id)decalAttach(g,B.lights,B.dim);for(const m of [B.mesh(B.b.wall,MATS.wall),B.mesh(B.b.floor,MATS.floor),B.mesh(B.b.ceil,MATS.ceil),B.mesh(B.b.glow,glowMat),B.mesh(B.b.grid,gridMat)])if(m){m.updateMatrix();g.add(m)}
   scene.add(g);chunks.set(id,g)}
-function removeChunk(id,g){occRects.delete(id);{const [x,z]=id.split(',').map(Number);occMark(x,z)}scene.remove(g);g.traverse(o=>o.geometry&&o.geometry.dispose());chunks.delete(id)}
+function removeChunk(id,g){if(decal&&decal.group===g)decal=null;occRects.delete(id);{const [x,z]=id.split(',').map(Number);occMark(x,z)}scene.remove(g);g.traverse(o=>o.geometry&&o.geometry.dispose());chunks.delete(id)}
 const statusEl=document.querySelector('#status');let lastCx=NaN,lastCz=NaN,queue=[];
+// Region retirement (continuous-world step 4, docs/WORLDGEN.md "Region retirement"). Once a second (busy = built or queued chunk) the
+// tracker reports retirable regions; each gets epoch + 1, so it is built differently the next time the player gets there. The
+// caches rebuild themselves (region()/layout() compare epochs). ?regen=off, or F3 "Rebuild retired regions" off, = dry run: log only.
+// The epoch sequence is deterministic (0, 1, 2 ... per region), so the same route gives the same world.
+const REGEN_OFF=new URLSearchParams(location.search).get('regen')==='off';
+const regen=regenTracker();let regenAt=0,regenEvents=0,regenRebuilt=0,regenStat=null;
+const regenApplies=()=>!REGEN_OFF&&Number(devValues.regenApply)!==0;
+function regenTick(now,cx,cz){if(now-regenAt<1000)return;regenAt=now;const q=new Set(queue.map(([x,z])=>x+','+z)),busy=(x,z)=>chunks.has(x+','+z)||q.has(x+','+z),apply=regenApplies();
+  for(const r of regen.update(now/1000,cx,cz,busy,devValues.regenDist??DEV_DEFAULT.regenDist,devValues.regenDelay??DEV_DEFAULT.regenDelay)){regenEvents++;
+    if(apply&&setRegionEpoch(r.rx,r.rz,r.epoch+1)){regen.forget(r.rx,r.rz);regenRebuilt++}
+    if(Number(devValues.regenLog))console.info(`[regen${apply?'':' dry run'}] region ${r.rx},${r.rz} ${apply?'rebuilt':'would be rebuilt'} (epoch ${r.epoch} -> ${r.epoch+1}); nearest chunk ${r.dist} chunks away`)}
+  if(devOpen&&regenStat)regenStat()}
 function updateChunks(){const cx=Math.floor(camera.position.x/tile),cz=Math.floor(camera.position.z/tile);
 if(cx!==lastCx||cz!==lastCz){lastCx=cx;lastCz=cz;queue=[];
   for(let x=cx-range;x<=cx+range;x++)for(let z=cz-range;z<=cz+range;z++)if(!chunks.has(x+','+z))queue.push([x,z]);
@@ -461,7 +574,7 @@ if(cx!==lastCx||cz!==lastCz){lastCx=cx;lastCz=cz;queue=[];
   for(const c of [layoutCache,infoCache])for(const id of c.keys()){const [x,z]=id.split(',').map(Number);if(Math.abs(x-cx)>range+4||Math.abs(z-cz)>range+4)c.delete(id)}
   for(const id of regCache.keys()){const [x,z]=id.split(',').map(Number);if(Math.abs((x*RS+xoff(z)+RS/2)/N-cx)>range+6||Math.abs((z*RS+RS/2)/N-cz)>range+6)regCache.delete(id)}
   statusEl.textContent=`SECTOR ${cx},${cz} · ${info(cx,cz).name}`}
-for(let n=0;n<2&&queue.length;n++){const [x,z]=queue.pop();addChunk(x,z)}}
+for(let n=0;n<2&&queue.length;n++){const [x,z]=queue.pop();addChunk(x,z)}if(!GEN_LEGACY)regenTick(performance.now(),cx,cz)}
 // Debug (?debug=map): top-down map of the 7 x 7 chunks around the player (walls dark, windows blue, pillars green, ceiling panels
 // yellow, chunk borders dashed red) for judging the generator without walking around. Does nothing without the parameter.
 const DBG_MAP=new URLSearchParams(location.search).get('debug')==='map';let mapCtx=null,mapAt=0;
@@ -484,7 +597,7 @@ let hum,AUD=null,stepN=null,masterGain=null;
 let introDuck=1,lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
 const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100,introEnabled:1,introDuration:8,introFall:1,introShake:.35,introBreath:.25,introImpact:.5,introDuck:.6,envEnabled:1,envWear:8,envDamp:3,envCeil:2,envIntensity:25,envShow:0,
   visProfile:0,visPost:1,bloomOn:1,lampGain:4,lampFog:36,bloomThr:1,bloomInt:28,bloomSpread:96,
-  fogBright:65,fogDens:100,exposure:100,toneKnee:100,grSat:90,grBlue:90,grLift:50,grGain:92,grCon:110,aoOn:1,aoInt:55,aoRad:60,lensDist:30,lensCA:40,grainShadow:60,showFps:0}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
+  fogBright:65,fogDens:100,exposure:100,toneKnee:100,grSat:90,grBlue:90,grLift:50,grGain:92,grCon:110,aoOn:1,aoInt:55,aoRad:60,lensDist:30,lensCA:40,grainShadow:60,showFps:0,regenApply:1,regenLog:0,regenDist:8,regenDelay:20,decalOn:1,decalH:120,decalY:145,decalOpacity:100,decalGain:100}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
 let devSaved={};try{devSaved=JSON.parse(localStorage.getItem('nullrooms.dev')||'{}')||{}}catch(e){}
 // VISUAL / RENDERING: one gain set per profile, so tuning Realistic never touches Original. Defaults are 100 % = the look the post shader always had.
 const VIS_FX=[['grain','Grain intensity','uGrain'],['vig','Vignette intensity','uVig'],['scan','Scanline intensity','uScan'],['halo','Halation intensity','uHalo'],['ca','Chromatic aberration','uCA']];
@@ -878,6 +991,34 @@ function applyEnv(){matSystem?.setEnvironment({enabled:Number(devValues.envEnabl
   input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};
   row.append(cap,input,out);devControls.append(row)}
  applyEnv()}
+// Region retirement (docs/WORLDGEN.md): rebuilds regions the player has left far behind. ?regen=off = dry run (log only).
+const REGEN_CFG=[['regenDist','Retire distance (nearest chunk, in 16 m chunks)',6,20,1,0,''],['regenDelay','Retire delay after leaving',0,180,5,0,' s']];
+{const h=document.createElement('h3');h.textContent='WORLD REGEN'+(REGEN_OFF?' (?regen=off: DRY RUN)':'');devControls.append(h);
+ const save=()=>{try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}};
+ {const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';cb.disabled=REGEN_OFF;en.append(cb,' Rebuild retired regions (off = dry run, log only)');
+  cb.onchange=()=>{devValues.regenApply=cb.checked?1:0;save();regen.reset()};devSync.push(()=>{cb.checked=regenApplies()});cb.checked=regenApplies();devControls.append(en)}
+ const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';en.append(cb,' Log rebuilds to the console');
+ cb.onchange=()=>{devValues.regenLog=cb.checked?1:0;save()};devSync.push(()=>{cb.checked=!!Number(devValues.regenLog)});cb.checked=!!Number(devValues.regenLog);devControls.append(en);
+ for(const [key,label,min,max,step,dec,suffix] of REGEN_CFG){
+  const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output'),val=()=>{const v=Number(devValues[key]);return Number.isFinite(v)?v:DEV_DEFAULT[key]};
+  cap.textContent=label;input.type='range';input.min=min;input.max=max;input.step=step;
+  const sync=()=>{input.value=val();out.textContent=val().toFixed(dec)+suffix};devSync.push(sync);sync();
+  input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};
+  row.append(cap,input,out);devControls.append(row)}
+ const st=document.createElement('div');st.style.cssText='font:11px monospace;opacity:.8;margin:2px 0 6px';devControls.append(st);
+ devSync.push(regenStat=()=>{const s=regen.stats();st.textContent=GEN_LEGACY?'off with ?gen=legacy':`tracked ${s.tracked} · waiting ${s.waiting} · retirable ${s.retirable} · events ${regenEvents} · rebuilt ${regenRebuilt}`})}
+// Start-room decal (fixed start area, docs/WORLDGEN.md): live, rebuilds only the one decal quad.
+const DECAL_CFG=[['decalH','Decal height',60,200,5,0,' cm'],['decalY','Decal centre above floor',80,220,5,0,' cm'],['decalOpacity','Decal opacity',0,100,1,0,'%'],['decalGain','Decal brightness',50,150,1,0,'%']];
+{const h=document.createElement('h3');h.textContent='START ROOM';devControls.append(h);
+ const save=()=>{applyDecal();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}};
+ const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';en.append(cb,' Start-room decal'+(START_DECAL?'':' (no wall found)'));
+ cb.onchange=()=>{devValues.decalOn=cb.checked?1:0;save()};devSync.push(()=>{cb.checked=!!Number(devValues.decalOn)});cb.checked=!!Number(devValues.decalOn);devControls.append(en);
+ for(const [key,label,min,max,step,dec,suffix] of DECAL_CFG){
+  const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output');
+  cap.textContent=label;input.type='range';input.min=min;input.max=max;input.step=step;
+  const sync=()=>{input.value=decalVal(key);out.textContent=decalVal(key).toFixed(dec)+suffix};devSync.push(sync);sync();
+  input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};
+  row.append(cap,input,out);devControls.append(row)}}
 // VISUAL / RENDERING section: profile switch (also F4 during play), post on/off, per-profile effect gains.
 const visToast=document.createElement('div');visToast.style.cssText='position:fixed;left:50%;bottom:9%;transform:translateX(-50%);padding:4px 10px;background:rgba(0,0,0,.6);color:#dce3dc;font:12px monospace;pointer-events:none;opacity:0;transition:opacity .25s;z-index:30';document.body.append(visToast);let visToastT=0;
 const visSave=()=>{try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}};
@@ -930,7 +1071,7 @@ const devPadInvert=document.querySelector('#devPadInvert');devSync.push(()=>{dev
 function devRefresh(){devSync.forEach(fn=>fn());document.querySelector('#devStatus').textContent='Audio: '+(AUD?.ctx.state||'not started')+' | '+['footsteps','breathing_idle','cough'].map(k=>k+': '+(audioBuffers[k]?.length?'file':'fallback')).join(' / ')}
 function toggleDev(open){devOpen=open;devPanel.hidden=!open;if(open){if(padMode)pauseGame(true);if(document.pointerLockElement===renderer.domElement)document.exitPointerLock();devRefresh()}else if(hasStarted&&overlay.style.display==='none')renderer.domElement.requestPointerLock().catch(()=>showMenu())}
 document.querySelector('#devClose').onclick=()=>toggleDev(false);
-document.querySelector('#devReset').onclick=()=>{Object.assign(devValues,DEV_DEFAULT);applyDevGains();applyEnv();applyVisual();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}devRefresh()};
+document.querySelector('#devReset').onclick=()=>{Object.assign(devValues,DEV_DEFAULT);applyDevGains();applyEnv();applyDecal();regen.reset();applyVisual();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}devRefresh()};
 document.querySelector('#devCopy').onclick=()=>{const data=JSON.stringify({audio:devValues,settings},null,2);navigator.clipboard?.writeText(data).catch(()=>console.info(data))};
 for(const button of devPanel.querySelectorAll('[data-sound]'))button.onclick=()=>{
  startHum();const t=AUD?.ctx.currentTime+.03;if(!AUD)return;

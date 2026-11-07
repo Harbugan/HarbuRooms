@@ -61,6 +61,7 @@ Reading the numbers honestly:
 ```
 node tools/gen-check.mjs --compare --radius 9     # determinism, boundary agreement, playability, statistics (legacy vs current)
 node tools/gen-map.mjs out.svg --radius 4         # top-down SVG map; --legacy, --cx/--cz, --scale, --no-grid, --mark x,z
+node tools/gen-check.mjs --epochs --radius 9 --runs 4 --baseline old-index.html   # region epochs, see below
 ```
 Both load the generator straight from `index.html` (the block between `GEN START` and `GEN END`). `tools/gen-lib.mjs`
 `chunkBoxes()` repeats the collision-box logic of `addChunk()`/`wallRun()`: if that changes, change it there too.
@@ -70,3 +71,129 @@ Both load the generator straight from `index.html` (the block between `GEN START
 * No real-GPU, real-browser play-through. Look for: wall seams at chunk borders (should be none), z-fighting, odd corners where
   a corridor meets a room, rooms that feel too big/small, and performance when crossing region borders.
 * Light interaction: lamp positions are untouched, but "whole room dark" (7 %) now follows the new rooms.
+
+## Region epochs (continuous-world step 0 + 1)
+
+Foundation for a world that can forget and rebuild areas the player has left. **Nothing changes an epoch yet**, so the game is
+unchanged; retiring regions is a later step.
+
+* Every region has an **epoch** (default 0). `regionEpoch(rx, rz)` / `setRegionEpoch(rx, rz, e)` in the `GEN` block.
+* The epoch salts the region's seeds: BSP, doors, windows, partitions, the region's N/W border openings (`edge()`) and the lamp
+  states of its chunks (dead/dim panels, dark rooms). `es(seed, 0) === seed`, so **epoch 0 is bit-identical** to the world before.
+* Epoch-independent on purpose (first version = room structure only): zones and specials (`info`), palettes, ceiling heights,
+  long corridors, chunk-border openings (`edgeOpen`), hall pillars and free-standing hall walls. The fixed start area therefore
+  only needs its regions pinned to epoch 0.
+* **Locality:** a chunk's layout depends only on its own region's epoch; its geometry, baked light and AO only on the epochs of
+  its 3 x 3 chunk neighbourhood (`addChunk` reads neighbour layouts at most one chunk away). So an epoch may change only while
+  that region and a one-chunk ring around it hold no built or queued chunk; then no visible chunk ever sees a changed input.
+* Caches self-invalidate: `region()` and `layout()` rebuild when the cached epoch differs from the current one.
+
+`gen-check --epochs` checks: epoch 0 against a baseline `index.html`; set + reset of epochs on a live generator; then for
+`--runs` random epoch tables (`--max-epoch`, `--seed`): locality of layouts and of collision boxes, determinism, boundary agreement,
+playability and openings on region borders (`regionBorders`: border segments without an opening of at least 2 cells).
+
+Measured (radius 9, 400 chunks, 51 regions; 4 runs seed 1-4 max epoch 3, and 12 runs seed 100-111 max epoch 9):
+
+| Check | Result |
+| --- | --- |
+| Epoch 0 vs `main` | 400 / 400 chunks bit-identical; `--compare` output identical except the new `regionBorders` field |
+| Cache set/reset on a live generator | ok |
+| Locality (layouts / collision boxes) | ok in all 16 runs |
+| Determinism, boundary agreement | ok in all 16 runs |
+| Region border segments without a passable opening | 0 of 50 in every run (narrowest best opening: 3 cells) |
+| Unreachable pockets away from the window edge | 0 in all 16 runs (after the walkability repair below) |
+
+Further mixed-epoch runs: radius 16, 6 runs, max epoch 5: all checks ok, 0 pockets.
+
+## Walkability repair (step 1b)
+
+**Problem (pre-existing on `main`, not caused by epochs).** With a large enough test window the generator produced sealed
+pockets: radius 16 two of 2 m2, radius 24 also 6 m2 and 73 m2, all in `maze` zones. Cause: a room is a set of connected cells,
+but it can have a **1-cell neck** (1 m between two wall ends = 0.7 m clear, narrower than the player's 0.74 m). The door tree
+treats the room as one node, so the rooms behind the neck were "connected" on paper and sealed in practice. (The 1-cell
+"narrow join" case was suspected first; instrumenting showed it never happens in these areas.)
+
+**Fix (end of `region()`).** The region is flooded the way the player walks: an open edge counts only if its open stretch on that
+line, between wall ends (walls along the line or touching it from either side), is at least 2 cells. Every part that is cut off
+and contains a 2 x 2 block of cells (anything smaller is a nook the player cannot stand in) is joined to another part with a
+2-cell door (random among candidates, 65 % get a lintel like other doors). It only removes walls, so it cannot break anything
+else, and regions without a defect are bit-identical. The region's S/E border lines belong to the neighbours and are assumed to
+be wall (conservative).
+
+Measured:
+
+| | `main` | now |
+| --- | --- | --- |
+| Pockets away from the window edge, radius 9 / 16 / 24 / 32 | 0 / 2 / 4 / 6 (73, 6, 3, 2, 2, 2 m2) | 0 / 0 / 0 / 0 |
+| Regions repaired, radius 40 (784 regions), epoch 0 / two mixed-epoch tables | - | 1.7 % / 1.3 % / 1.1 %, one door each, never gives up |
+| Chunks whose layout differs from `main`, radius 32 (4225 chunks) | - | 9 (0.21 %); nearest 12 chunks (192 m) from spawn |
+| Epoch-0 digest vs `main`, radius 9 (start area) | - | 400 / 400 bit-identical |
+| Determinism, boundary agreement, region-border openings (radius 9-32) | ok | ok; no border segment without a passable opening |
+| Layout generation, radius 40 (Node, single run, noisy) | ~0.12 ms/chunk | ~0.165 ms/chunk |
+
+Not covered by the repair: openings **across** region borders. `region()` cannot see the neighbour's walls, so a border opening
+can be split into 1-cell pieces (`onePieceGaps` in `gen-check`). It is measured, not guaranteed: every border segment so far has at
+least one passable opening (narrowest best 2 cells at radius 32). Also not covered: pillars and free-standing walls in open
+chunks (halls, forest, atrium), which are added per chunk; no pocket was found there.
+
+## Start area (continuous-world step 2)
+
+* **Pinned.** Every region that holds a chunk within `START_PIN` = 2 chunks of the spawn chunk (0,0) keeps epoch 0 forever
+  (currently 5 regions). `setRegionEpoch()` refuses them and returns `false`. The start area is procedural, not hand-made, and
+  identical to before (it is bit-identical to `main` within radius 9).
+* **Start-room decal.** A fixed landmark so the start can be recognised on return: the supplied painting
+  `assets/decals/start_window.webp` ("ONLY EXIT IS THROUGH THE WINDOW...", 1441 x 1881, RGBA, used unmodified).
+  * Placement: `startMark()` in the `GEN` block (pure, deterministic). The spawn room is the region room under cell (8, 8).
+    Candidates are 2-cell stretches of full-height wall (no window) facing into that room, with no wall touching the middle vertex
+    from the room side, visible from the spawn cell. Best = facing the spawn, about 4 m away.
+  * Result in the current world: the north face of a free-standing partition at z = 12, centred on x = 11, facing -z, about
+    4.2 m from the spawn cell and about 2.4 m behind-right of where the intro leaves the player (who faces -z). It is not in the
+    first frame; it is seen as soon as the player turns around, and from most of the room.
+  * Rendering: one 4 x 4-vertex quad in the chunk that holds it, one shared Lambert material (like the legacy walls), vertex colours
+    = the baked light level at each vertex (`bakeLevel()`, the same formula `Builder.box()` uses, now shared), fogged, alpha-blended,
+    6 mm off the wall face plus polygon offset. No collision, no new lights. It is disposed with its chunk.
+  * F3 "START ROOM": decal on/off, height (default 120 cm), centre height (145 cm), opacity (100 %), brightness (100 %). Live; only
+    the decal quad is rebuilt. Defaults change nothing else.
+  * `?gen=legacy`: no region rooms there, so no decal.
+* `gen-check --epochs` also checks: pinned regions refuse an epoch; the start chunks and the decal position are unchanged in
+  every random epoch table; the decal sits on a full wall.
+
+## Region retirement (continuous-world steps 3 + 4)
+
+**Step 4 (now): active by default.** Every retirable region gets epoch + 1 and is built differently the next time the player gets
+there. `?regen=off` (or F3 "Rebuild retired regions" off) is the dry run of step 3: decide and log only, the world never changes.
+The epoch sequence per region is deterministic (0, 1, 2 ...), so the same route through the world gives the same result.
+
+What a rebuild changes (first version = room structure only): rooms, doors, partitions, windows, the region's N/W border openings
+and lamp states. Open zones (halls, pillar forest, atrium) keep their pillars and free-standing walls, so there only the lamps
+and the border openings change; zones, palettes, ceiling heights and long corridors stay where they are.
+
+Memory: one small map entry per rebuilt region (about 1000 per hour of fast walking in the simulator); never trimmed, because
+forgetting an epoch is itself a rebuild and must obey the same safety rule.
+
+* `regenTracker()` (GEN block, pure) tracks every non-pinned region that had a built chunk. A region becomes **retirable** when
+  1. neither the region nor a one-chunk ring around it holds a built or queued chunk (a built chunk depends on its 3 x 3
+     neighbourhood only, so no built chunk can see the change),
+  2. its nearest chunk is at least `regenDist` chunks from the player (default 8 = 128 m, hysteresis), and
+  3. both have held for `regenDelay` seconds (default 20 s). Coming back resets the timer.
+* `regionChunks(rx, rz)`: the 3 x 3 chunks of a region, without building it.
+* In game (`regenTick`, once a second from `updateChunks`): F3 "WORLD REGEN" has the rebuild switch, the distance, the delay, a
+  console-log switch (`[regen] region rx,rz rebuilt (epoch a -> b) ...`) and a live readout (tracked / waiting / retirable / events /
+  rebuilt). Off with `?gen=legacy`. Tracker entries are capped (512).
+* `tools/regen-sim.mjs` walks a virtual player with the game's loading rule and the game's own tracker. With `--apply` it really
+  bumps epochs (what step 4 will do) and checks, every 5 simulated seconds, that no built chunk or any of its 3 x 3 neighbour
+  layouts changed while built, and that the start chunks never change. `--no-ring` is a negative control.
+
+Measured (`regen-sim`, 1 h simulated walks, legs of 20-300 s at 1.4-4.6 m/s, every 4th leg back towards the spawn):
+
+| Run | Result |
+| --- | --- |
+| Dry run, 30 min, seed 1 | 517 would-be rebuilds; safety ok; start unchanged |
+| `--apply`, seeds 1/2/3 | 941 / 978 / 905 rebuilds; 183 / 171 / 258 revisits found a rebuilt region; epochs up to 4; safety ok; start unchanged |
+| `--apply --dist 6 --delay 0` (F3 minimum) | 264 rebuilds in 15 min; safety ok |
+| Negative control `--no-ring --dist 4` | FAIL, 2187 violations (the check does catch unsafe retirement) |
+| Headless Chromium, camera moved 576 m east (step 3) | 34 dry-run log lines, no page errors |
+| Headless Chromium, step 4: 900 m east and back, delay 0 | 124 regions rebuilt; start region still epoch 0; decal present; no page errors |
+
+Not modelled by the simulator: walls (the virtual player walks through them) and the per-frame build queue (chunks appear at once;
+the game also counts queued chunks as busy).

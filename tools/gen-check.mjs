@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 // World-generator checks: determinism, playability (flood fill with the game's real collision rule) and layout statistics.
 //   node tools/gen-check.mjs [--radius 6] [--legacy] [--compare] [--json]
+//   node tools/gen-check.mjs --epochs [--runs 4] [--seed 1] [--max-epoch 3] [--baseline old-index.html]
 // --compare runs the legacy generator (?gen=legacy) and the current one side by side.
+// --epochs (region epochs, docs/WORLDGEN.md): runs the all-epoch-0 world and --runs worlds where every region gets a random epoch
+// 0..max-epoch, and checks: epoch 0 unchanged (vs --baseline, e.g. `git show origin/main:index.html > /tmp/old.html`), locality
+// (a chunk's layout depends only on its own region's epoch; its collision boxes only on the epochs of its 3x3 neighbourhood),
+// determinism, boundary agreement, playability and the openings on region borders, in mixed-epoch worlds.
 import {createHash} from 'node:crypto';
 import {loadGen,chunkBoxes} from './gen-lib.mjs';
 
@@ -13,13 +18,13 @@ function digest(G,L){const h=createHash('sha1');
 
 function chunkList(){const l=[];for(let z=-R;z<=R+1;z++)for(let x=-R;x<=R+1;x++)l.push([x,z]);return l}
 
-function generate(legacy,reverse=false){const G=loadGen({legacy}),l=chunkList();if(reverse)l.reverse();
+function generate(legacy,reverse=false,setup=null,file){const G=loadGen({legacy,file}),l=chunkList();if(setup)setup(G);if(reverse)l.reverse();
   const t0=performance.now(),dg=new Map();for(const [x,z] of l)dg.set(x+','+z,digest(G,G.layout(x,z)));
   return {G,dg,ms:performance.now()-t0,n:l.length}}
 
-function analyse(legacy){
+function analyse(legacy,setup=null){
   const out={};
-  const A=generate(legacy),B=generate(legacy,true);
+  const A=generate(legacy,false,setup),B=generate(legacy,true,setup);
   let diff=0;for(const [k,v] of A.dg)if(B.dg.get(k)!==v)diff++;
   out.determinism=diff?`FAIL: ${diff} chunks differ with reversed generation order`:'ok (forward == reverse order)';
   out.genMsPerChunk=+(A.ms/A.n).toFixed(2);
@@ -92,9 +97,64 @@ function analyse(legacy){
   for(let s=0;s<M*M;s++)if(free2[s]&&!seen[s]){const [c,b,px,pz]=flood(s,2);if(c*S*S>=2)pockets.push({m2:+(c*S*S).toFixed(1),touchesBorder:!!b,at:[+px.toFixed(1),+pz.toFixed(1)]})}
   out.playability={reachableM2:+(reach*S*S).toFixed(0),unreachablePockets:pockets.length,unreachableM2:+pockets.reduce((s,p)=>s+p.m2,0).toFixed(1),
     pocketsNotAtBorder:pockets.filter(p=>!p.touchesBorder).length,largest:pockets.sort((a,b)=>b.m2-a.m2).slice(0,opt('pockets')?99:3)};
+  if(!legacy){out.regionBorders=regionBorders(G,W0,W1,x0,z0,W);out.startMark=startMarkCheck(G)}
+  return out}
+
+// Openings on region borders (the N and W border lines of every region fully inside the window). An open stretch between two
+// border walls is split wherever a perpendicular wall touches the border line from either side; a 1-cell piece is 0.7 m clear,
+// narrower than the player (0.74 m), so it is not passable on its own. Reported per border segment (one region's N or W side).
+function regionBorders(G,W0,W1,x0,z0,W){const N=G.N,RS=G.RS,seen=new Set();let segs=0,blocked=0,pieces=0,narrow=0,minBest=1e9;
+  const inside=(gx,gz)=>gx>=0&&gz>=0&&gx<W&&gz<W;
+  for(let cz=-R;cz<=R+1;cz++)for(let cx=-R;cx<=R+1;cx++){const [rx,rz]=G.regionAt(cx,cz),id=rx+','+rz;if(seen.has(id))continue;seen.add(id);
+    const R0=G.region(rx,rz),ox=R0.ox-x0,oz=R0.oz-z0;if(ox<1||oz<1||ox+RS>W-1||oz+RS>W-1)continue; // needs both sides inside the window
+    for(let ax=0;ax<2;ax++){const line=ax?ox:oz,a=ax?oz:ox,Wa=ax?W1:W0,Wp=ax?W0:W1;let best=0;segs++;
+      // perpendicular wall at vertex k on this line: other-axis line k, cells line-1 / line
+      const perp=k=>Wp[k*W+line-1]||Wp[k*W+line];
+      for(let i=a;i<a+RS;){if(Wa[line*W+i]===1||Wa[line*W+i]===2){i++;continue}let j=i;while(j<a+RS&&!Wa[line*W+j])j++;
+        let s=i;for(let k=i+1;k<=j;k++)if(k===j||perp(k)){const w=k-s;pieces++;if(w<2)narrow++;if(w>best)best=w;s=k}i=j}
+      if(best<2)blocked++;minBest=Math.min(minBest,best)}}
+  return {segments:segs,segmentsWithoutPassableOpening:blocked,narrowestBestOpeningCells:minBest===1e9?null:minBest,openingPieces:pieces,onePieceGaps:narrow}}
+
+// Start-room decal placement: exists, sits on a full wall (value 1) of two cells, in the spawn room.
+function startMarkCheck(G){const M=G.startMark();if(!M)return 'FAIL: no wall found for the start-room decal';
+  const N=G.N,wv=(ax,line,i)=>{const gx=ax?line:i,gz=ax?i:line,cx=Math.floor(gx/N),cz=Math.floor(gz/N),L=G.layout(cx,cz);return ax?L.vw[(gx-cx*N)*N+gz-cz*N]:L.hw[(gz-cz*N)*N+gx-cx*N]};
+  const ok=wv(M.ax,M.line,M.k-1)===1&&wv(M.ax,M.line,M.k)===1;return ok?`ok (${M.ax?'x':'z'}=${M.line} at ${M.k}, facing ${M.nx},${M.nz}, ${M.dist} m from the spawn cell, chunk ${M.chunk})`:'FAIL: decal is not on a full wall'}
+// Random epoch table for all regions touching the window (plus one chunk of margin), from a run seed. 0 is included on purpose.
+function epochSetup(seed,maxE){return G=>{for(let cz=-R-2;cz<=R+3;cz++)for(let cx=-R-2;cx<=R+3;cx++){const [rx,rz]=G.regionAt(cx,cz);
+  let h=Math.imul(rx,374761393)^Math.imul(rz,668265263)^Math.imul(seed+1,1442695041);h=Math.imul(h^(h>>>13),1274126177);G.setRegionEpoch(rx,rz,((h^(h>>>16))>>>0)%(maxE+1))}}}
+function epochs(){const out={},runs=val('runs',4),seed=val('seed',1),maxE=val('max-epoch',3),bi=argv.indexOf('--baseline');
+  const all=chunkList(),dig=(G,cx,cz)=>digest(G,G.layout(cx,cz)),box=(G,cx,cz)=>JSON.stringify(chunkBoxes(G,cx,cz));
+  const Z=generate(false);
+  if(bi>=0){const O=generate(false,false,null,argv[bi+1]);let d=0;for(const [k,v] of Z.dg)if(O.dg.get(k)!==v)d++;
+    out.epoch0VsBaseline=d?`FAIL: ${d} of ${Z.n} chunks differ from ${argv[bi+1]}`:`ok (${Z.n} chunks bit-identical)`}
+  else out.epoch0VsBaseline='skipped (no --baseline)';
+  // setting and clearing epochs on a live generator must give back the original world (cache self-invalidation)
+  {const G=loadGen();for(const [x,z] of all)G.layout(x,z);epochSetup(seed,maxE)(G);for(const [x,z] of all)G.layout(x,z);
+    for(const [x,z] of all){const [rx,rz]=G.regionAt(x,z);G.setRegionEpoch(rx,rz,0)}let d=0;for(const [x,z] of all)if(dig(G,x,z)!==Z.dg.get(x+','+z))d++;
+    out.cacheInvalidation=d?`FAIL: ${d} chunks still show a stale epoch after reset`:'ok (epochs set and reset on a live generator)'}
+  {const G=loadGen();let refused=0,n=0;for(let a=-G.START_PIN;a<=G.START_PIN;a++)for(let b=-G.START_PIN;b<=G.START_PIN;b++){const [rx,rz]=G.regionAt(a,b);n++;if(G.setRegionEpoch(rx,rz,5)===false&&G.regionEpoch(rx,rz)===0)refused++}
+    out.startPinned=refused===n?`ok (setRegionEpoch refused for all ${n} start chunks' regions)`:`FAIL: ${n-refused} start chunks could change epoch`}
+  out.startMark=startMarkCheck(Z.G);
+  out.runs=[];
+  for(let k=0;k<runs;k++){const setup=epochSetup(seed+k,maxE),G=loadGen();setup(G);
+    let changed=0,loc=0,locN=0,boxBad=0,boxN=0,regs=new Map();
+    for(const [x,z] of all){const [rx,rz]=G.regionAt(x,z),e=G.regionEpoch(rx,rz);regs.set(rx+','+rz,e);const d=dig(G,x,z),z0=Z.dg.get(x+','+z);
+      if(e===0){locN++;if(d!==z0)loc++}else if(d!==z0)changed++}
+    for(let cz=-R+1;cz<=R;cz++)for(let cx=-R+1;cx<=R;cx++){let all0=true;for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++)if(G.regionEpoch(...G.regionAt(cx+a,cz+b)))all0=false;
+      if(!all0)continue;boxN++;if(box(G,cx,cz)!==box(Z.G,cx,cz))boxBad++}
+    let startBad=0;for(let a=-G.START_PIN;a<=G.START_PIN;a++)for(let b=-G.START_PIN;b<=G.START_PIN;b++)if(dig(G,a,b)!==Z.dg.get(a+','+b))startBad++;
+    const markSame=JSON.stringify(G.startMark())===JSON.stringify(Z.G.startMark());
+    const nE=[...regs.values()].filter(e=>e).length,A=analyse(false,setup);
+    out.runs.push({seed:seed+k,regions:regs.size,regionsWithEpoch:nE,chunksChangedInEpochRegions:changed,
+      locality:loc?`FAIL: ${loc} of ${locN} epoch-0 chunks changed`:`ok (${locN} epoch-0 chunks unchanged)`,
+      startArea:startBad||!markSame?`FAIL: ${startBad} start chunks changed, decal ${markSame?'same':'moved'}`:'ok (start chunks and decal unchanged)',
+      collisionLocality:boxBad?`FAIL: ${boxBad} of ${boxN} chunks with an all-epoch-0 3x3 neighbourhood changed`:`ok (${boxN} chunks)`,
+      determinism:A.determinism,edgeAgreement:A.edgeAgreement,playability:A.playability,regionBorders:A.regionBorders,rooms:{count:A.rooms.count,deadEndPct:A.rooms.deadEndPct}})}
+  out.allEpoch0={playability:analyse(false).playability,regionBorders:analyse(false).regionBorders};
   return out}
 
 const modes=opt('compare')?[true,false]:[opt('legacy')];const res={};
+if(opt('epochs'))res.epochs=epochs();else
 for(const m of modes)res[m?'legacy':'current']=analyse(m);
 if(opt('json'))console.log(JSON.stringify(res,null,1));
 else for(const k in res){console.log(`\n=== ${k} (radius ${R} chunks = ${(2*R+1)**2} chunks) ===`);console.log(JSON.stringify(res[k],null,1))}

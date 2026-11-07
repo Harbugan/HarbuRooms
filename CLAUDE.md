@@ -49,3 +49,12 @@ The intro (`introStart/introSkip/introTick` in `index.html`) is a state machine 
 
 ## Environmental details (step 4A)
 Wear, dampness and ceiling stains are a shader-only layer in the shared Level 0 materials (`GLSL_ENV` in `src/materials/level0.js`), driven by shared uniforms and the F3 "ENVIRONMENT" section (`ENV_CFG`/`applyEnv` in `index.html`). Rules: decide per world-space cell via hash (deterministic, no per-chunk state, no new meshes/materials/draw calls), change albedo only, keep effects subtle and fading inside their cell. Details: `docs/ENVIRONMENT.md`.
+
+## Continuous world (region epochs)
+Regions (48 m, 3 x 3 chunks) carry an epoch that salts their room layout; regions the player has left far behind get epoch + 1 and
+are rebuilt differently (`regenTracker`/`regenTick` in `index.html`, `?regen=off` = log only). Rules: epoch 0 must stay bit-identical
+to the original world; a chunk's layout may depend only on its own region's epoch; an epoch may change only while the region and a
+one-chunk ring hold no built or queued chunk; the start area (regions within 2 chunks of spawn) is pinned to epoch 0 and holds the
+start-room decal. Verify generator changes with `node tools/gen-check.mjs --epochs` and `node tools/regen-sim.mjs --apply`.
+Details: `docs/WORLDGEN.md`.
+
