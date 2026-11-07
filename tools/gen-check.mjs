@@ -97,7 +97,7 @@ function analyse(legacy,setup=null){
   for(let s=0;s<M*M;s++)if(free2[s]&&!seen[s]){const [c,b,px,pz]=flood(s,2);if(c*S*S>=2)pockets.push({m2:+(c*S*S).toFixed(1),touchesBorder:!!b,at:[+px.toFixed(1),+pz.toFixed(1)]})}
   out.playability={reachableM2:+(reach*S*S).toFixed(0),unreachablePockets:pockets.length,unreachableM2:+pockets.reduce((s,p)=>s+p.m2,0).toFixed(1),
     pocketsNotAtBorder:pockets.filter(p=>!p.touchesBorder).length,largest:pockets.sort((a,b)=>b.m2-a.m2).slice(0,opt('pockets')?99:3)};
-  if(!legacy)out.regionBorders=regionBorders(G,W0,W1,x0,z0,W);
+  if(!legacy){out.regionBorders=regionBorders(G,W0,W1,x0,z0,W);out.startMark=startMarkCheck(G)}
   return out}
 
 // Openings on region borders (the N and W border lines of every region fully inside the window). An open stretch between two
@@ -115,6 +115,10 @@ function regionBorders(G,W0,W1,x0,z0,W){const N=G.N,RS=G.RS,seen=new Set();let s
       if(best<2)blocked++;minBest=Math.min(minBest,best)}}
   return {segments:segs,segmentsWithoutPassableOpening:blocked,narrowestBestOpeningCells:minBest===1e9?null:minBest,openingPieces:pieces,onePieceGaps:narrow}}
 
+// Start-room decal placement: exists, sits on a full wall (value 1) of two cells, in the spawn room.
+function startMarkCheck(G){const M=G.startMark();if(!M)return 'FAIL: no wall found for the start-room decal';
+  const N=G.N,wv=(ax,line,i)=>{const gx=ax?line:i,gz=ax?i:line,cx=Math.floor(gx/N),cz=Math.floor(gz/N),L=G.layout(cx,cz);return ax?L.vw[(gx-cx*N)*N+gz-cz*N]:L.hw[(gz-cz*N)*N+gx-cx*N]};
+  const ok=wv(M.ax,M.line,M.k-1)===1&&wv(M.ax,M.line,M.k)===1;return ok?`ok (${M.ax?'x':'z'}=${M.line} at ${M.k}, facing ${M.nx},${M.nz}, ${M.dist} m from the spawn cell, chunk ${M.chunk})`:'FAIL: decal is not on a full wall'}
 // Random epoch table for all regions touching the window (plus one chunk of margin), from a run seed. 0 is included on purpose.
 function epochSetup(seed,maxE){return G=>{for(let cz=-R-2;cz<=R+3;cz++)for(let cx=-R-2;cx<=R+3;cx++){const [rx,rz]=G.regionAt(cx,cz);
   let h=Math.imul(rx,374761393)^Math.imul(rz,668265263)^Math.imul(seed+1,1442695041);h=Math.imul(h^(h>>>13),1274126177);G.setRegionEpoch(rx,rz,((h^(h>>>16))>>>0)%(maxE+1))}}}
@@ -128,6 +132,9 @@ function epochs(){const out={},runs=val('runs',4),seed=val('seed',1),maxE=val('m
   {const G=loadGen();for(const [x,z] of all)G.layout(x,z);epochSetup(seed,maxE)(G);for(const [x,z] of all)G.layout(x,z);
     for(const [x,z] of all){const [rx,rz]=G.regionAt(x,z);G.setRegionEpoch(rx,rz,0)}let d=0;for(const [x,z] of all)if(dig(G,x,z)!==Z.dg.get(x+','+z))d++;
     out.cacheInvalidation=d?`FAIL: ${d} chunks still show a stale epoch after reset`:'ok (epochs set and reset on a live generator)'}
+  {const G=loadGen();let refused=0,n=0;for(let a=-G.START_PIN;a<=G.START_PIN;a++)for(let b=-G.START_PIN;b<=G.START_PIN;b++){const [rx,rz]=G.regionAt(a,b);n++;if(G.setRegionEpoch(rx,rz,5)===false&&G.regionEpoch(rx,rz)===0)refused++}
+    out.startPinned=refused===n?`ok (setRegionEpoch refused for all ${n} start chunks' regions)`:`FAIL: ${n-refused} start chunks could change epoch`}
+  out.startMark=startMarkCheck(Z.G);
   out.runs=[];
   for(let k=0;k<runs;k++){const setup=epochSetup(seed+k,maxE),G=loadGen();setup(G);
     let changed=0,loc=0,locN=0,boxBad=0,boxN=0,regs=new Map();
@@ -135,9 +142,12 @@ function epochs(){const out={},runs=val('runs',4),seed=val('seed',1),maxE=val('m
       if(e===0){locN++;if(d!==z0)loc++}else if(d!==z0)changed++}
     for(let cz=-R+1;cz<=R;cz++)for(let cx=-R+1;cx<=R;cx++){let all0=true;for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++)if(G.regionEpoch(...G.regionAt(cx+a,cz+b)))all0=false;
       if(!all0)continue;boxN++;if(box(G,cx,cz)!==box(Z.G,cx,cz))boxBad++}
+    let startBad=0;for(let a=-G.START_PIN;a<=G.START_PIN;a++)for(let b=-G.START_PIN;b<=G.START_PIN;b++)if(dig(G,a,b)!==Z.dg.get(a+','+b))startBad++;
+    const markSame=JSON.stringify(G.startMark())===JSON.stringify(Z.G.startMark());
     const nE=[...regs.values()].filter(e=>e).length,A=analyse(false,setup);
     out.runs.push({seed:seed+k,regions:regs.size,regionsWithEpoch:nE,chunksChangedInEpochRegions:changed,
       locality:loc?`FAIL: ${loc} of ${locN} epoch-0 chunks changed`:`ok (${locN} epoch-0 chunks unchanged)`,
+      startArea:startBad||!markSame?`FAIL: ${startBad} start chunks changed, decal ${markSame?'same':'moved'}`:'ok (start chunks and decal unchanged)',
       collisionLocality:boxBad?`FAIL: ${boxBad} of ${boxN} chunks with an all-epoch-0 3x3 neighbourhood changed`:`ok (${boxN} chunks)`,
       determinism:A.determinism,edgeAgreement:A.edgeAgreement,playability:A.playability,regionBorders:A.regionBorders,rooms:{count:A.rooms.count,deadEndPct:A.rooms.deadEndPct}})}
   out.allEpoch0={playability:analyse(false).playability,regionBorders:analyse(false).regionBorders};

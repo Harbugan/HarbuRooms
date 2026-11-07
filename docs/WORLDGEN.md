@@ -135,3 +135,25 @@ Not covered by the repair: openings **across** region borders. `region()` cannot
 can be split into 1-cell pieces (`onePieceGaps` in `gen-check`). It is measured, not guaranteed: every border segment so far has at
 least one passable opening (narrowest best 2 cells at radius 32). Also not covered: pillars and free-standing walls in open
 chunks (halls, forest, atrium), which are added per chunk; no pocket was found there.
+
+## Start area (continuous-world step 2)
+
+* **Pinned.** Every region that holds a chunk within `START_PIN` = 2 chunks of the spawn chunk (0,0) keeps epoch 0 forever
+  (currently 5 regions). `setRegionEpoch()` refuses them and returns `false`. The start area is procedural, not hand-made, and
+  identical to before (it is bit-identical to `main` within radius 9).
+* **Start-room decal.** A fixed landmark so the start can be recognised on return: the supplied painting
+  `assets/decals/start_window.webp` ("ONLY EXIT IS THROUGH THE WINDOW...", 1441 x 1881, RGBA, used unmodified).
+  * Placement: `startMark()` in the `GEN` block (pure, deterministic). The spawn room is the region room under cell (8, 8).
+    Candidates are 2-cell stretches of full-height wall (no window) facing into that room, with no wall touching the middle vertex
+    from the room side, visible from the spawn cell. Best = facing the spawn, about 4 m away.
+  * Result in the current world: the north face of a free-standing partition at z = 12, centred on x = 11, facing -z, about
+    4.2 m from the spawn cell and about 2.4 m behind-right of where the intro leaves the player (who faces -z). It is not in the
+    first frame; it is seen as soon as the player turns around, and from most of the room.
+  * Rendering: one 4 x 4-vertex quad in the chunk that holds it, one shared Lambert material (like the legacy walls), vertex colours
+    = the baked light level at each vertex (`bakeLevel()`, the same formula `Builder.box()` uses, now shared), fogged, alpha-blended,
+    6 mm off the wall face plus polygon offset. No collision, no new lights. It is disposed with its chunk.
+  * F3 "START ROOM": decal on/off, height (default 120 cm), centre height (145 cm), opacity (100 %), brightness (100 %). Live; only
+    the decal quad is rebuilt. Defaults change nothing else.
+  * `?gen=legacy`: no region rooms there, so no decal.
+* `gen-check --epochs` also checks: pinned regions refuse an epoch; the start chunks and the decal position are unchanged in
+  every random epoch table; the decal sits on a full wall.
