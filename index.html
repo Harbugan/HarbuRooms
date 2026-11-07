@@ -19,9 +19,9 @@ const camera=new THREE.PerspectiveCamera(78,innerWidth/innerHeight,.05,110);came
 const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
 // --- VHS post pass: scene renders into a half-float target, then a full-screen shader smears, wobbles, tints and vignettes it.
 let RES=.85;const rt=new THREE.WebGLRenderTarget(2,2,{type:THREE.HalfFloatType,samples:4,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
-const vhsMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tDiffuse:{value:rt.texture},time:{value:0},res:{value:new THREE.Vector2(1,1)},shake:{value:0},intensity:{value:.75},uReal:{value:0},uPost:{value:1},uGrain:{value:1},uVig:{value:1},uScan:{value:1},uHalo:{value:1},uCA:{value:1},uExp:{value:1},uTone:{value:1},uGrade:{value:new THREE.Vector4(.78,.92,1,1)},uBlue:{value:1},tBloom0:{value:null},tBloom1:{value:null},tBloom2:{value:null},uBloomOn:{value:0},uBloomW:{value:new THREE.Vector3()}},
+const vhsMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tDiffuse:{value:rt.texture},time:{value:0},res:{value:new THREE.Vector2(1,1)},shake:{value:0},intensity:{value:.75},uReal:{value:0},uPost:{value:1},uGrain:{value:1},uVig:{value:1},uScan:{value:1},uHalo:{value:1},uCA:{value:1},uExp:{value:1},uTone:{value:1},uGrade:{value:new THREE.Vector4(.78,.92,1,1)},uBlue:{value:1},tBloom0:{value:null},tBloom1:{value:null},tBloom2:{value:null},uBloomOn:{value:0},uBloomW:{value:new THREE.Vector3()},uLens:{value:0},uCAr:{value:0},uGrainL:{value:0}},
 vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
-fragmentShader:`precision highp float;uniform sampler2D tDiffuse;uniform float time,shake,intensity,uReal,uPost,uGrain,uVig,uScan,uHalo,uCA,uBloomOn,uExp,uTone,uBlue;uniform vec4 uGrade;uniform sampler2D tBloom0,tBloom1,tBloom2;uniform vec3 uBloomW;uniform vec2 res;varying vec2 vUv;
+fragmentShader:`precision highp float;uniform sampler2D tDiffuse;uniform float time,shake,intensity,uReal,uPost,uGrain,uVig,uScan,uHalo,uCA,uBloomOn,uExp,uTone,uBlue,uLens,uCAr,uGrainL;uniform vec4 uGrade;uniform sampler2D tBloom0,tBloom1,tBloom2;uniform vec3 uBloomW;uniform vec2 res;varying vec2 vUv;
 float h11(float x){return fract(sin(x*127.1)*43758.5453);}
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float n1(float x){float i=floor(x),f=fract(x);f=f*f*(3.-2.*f);return mix(h11(i),h11(i+1.),f);}
@@ -38,6 +38,9 @@ void main(){
   // post disabled: neutral, correctly encoded passthrough (skips every tap below)
   if(uPost<.5){gl_FragColor=vec4(srgbOetf(texture2D(tDiffuse,vUv).rgb),1.);return;}
   vec2 uv=vUv;vec3 bl=vec3(0.);
+  // REALISTIC lens: gentle barrel distortion (corners stay put, centre magnifies slightly); uLens = 0 in ORIGINAL skips it
+  if(uLens>0.){vec2 q=uv-.5,pq=q*vec2(res.x/res.y,1.);float r2=dot(pq,pq)/dot(vec2(.5*res.x/res.y,.5),vec2(.5*res.x/res.y,.5));uv=.5+q*(1.+uLens*(r2-1.));}
+  vec2 uvL=uv;
   // slow tape wobble + head-switching noise along the bottom edge
   float bot=smoothstep(.07,0.,uv.y);
   float wob=sin(uv.y*16.+time*1.9)*.0007+sin(uv.y*3.+time*.7)*.0012+(n1(time*.6)-.5)*.0016;
@@ -51,9 +54,10 @@ void main(){
   uv.y+=shake*.002*sin(time*50.);
   // horizontal chroma bleed (smeared luma, offset colour channels)
   float px=1./res.x,ca=px*(2.2+bot*8.+band*10.)*uCA;
+  vec2 cr=(uvL-.5)*uCAr; // REALISTIC lens CA: radial, zero at the centre, grows towards the corners
   vec3 col=vec3(0.);float ws=0.;
   for(int k=-3;k<=3;k++){float w=exp(-float(k*k)*.22),o=float(k)*px*1.6;
-    col+=w*vec3(T(uv+vec2(o+ca,0.)).r,T(uv+vec2(o,0.)).g,T(uv+vec2(o-ca,0.)).b);ws+=w;}
+    col+=w*vec3(T(uv+vec2(o+ca,0.)+cr).r,T(uv+vec2(o,0.)).g,T(uv+vec2(o-ca,0.)-cr).b);ws+=w;}
   col=col/ws;
   // dreamy halation: wide soft blur of bright areas bleeds into the picture
   vec3 glow=vec3(0.);for(int k=0;k<16;k++){float a=float(k)*2.39996,r=sqrt(float(k)+.5)/4.;vec2 o=vec2(cos(a),sin(a))*r*vec2(res.y/res.x,1.)*.06;
@@ -73,7 +77,7 @@ void main(){
   // scanlines
   col*=1.-.2*uScan*(.5+.5*sin(vUv.y*330.*6.2832));
   // static grain, random bright dropout streaks, subtle brightness flicker
-  col+=(h21(vUv*res+fract(time)*91.)-.5)*.11*uGrain;
+  col+=(h21(vUv*res+fract(time)*91.)-.5)*.11*uGrain*mix(1.,mix(1.6,.45,smoothstep(.04,.55,l)),uGrainL); // REALISTIC: sensor-like, stronger in shadows
   float row=floor(vUv.y*260.);
   if(h21(vec2(row,floor(time*25.)))>.9975)col+=.25*step(h21(vec2(row,7.)),.6);
   col+=band*(h21(vUv*res*.5+time)-.35)*.45;
@@ -82,7 +86,7 @@ void main(){
   vec2 q=(vUv-.5)*vec2(1.08,1.);float v=length(q)*1.35;
   col*=max(1.-smoothstep(.4,1.05,v)*.8*uVig,0.);
   col*=smoothstep(0.,.03,vUv.y)*.35+.65;
-  vec3 clean=texture2D(tDiffuse,vUv).rgb;if(uReal>.5)clean=srgbOetf(clean+bl);col=mix(clean,col,intensity);gl_FragColor=vec4(col,1.);}`});
+  vec3 clean=texture2D(tDiffuse,uvL).rgb;if(uReal>.5)clean=srgbOetf(clean+bl);col=mix(clean,col,intensity);gl_FragColor=vec4(col,1.);}`});
 const postScene=new THREE.Scene(),postCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),vhsMat));
 // --- Fluorescent bloom (4C.2 phase 1, REALISTIC profile only). Threshold on HDR lamps -> 1/4-res bright pass -> 3 gaussian levels
 // (1/4, 1/8, 1/16) summed in vhsMat. Half-float targets, no depth/MSAA; ~7 tiny passes, skipped entirely when off / ORIGINAL.
@@ -372,26 +376,44 @@ const GLOW_U={value:new THREE.Vector2(1,1)};
 glowMat.onBeforeCompile=sh=>{sh.uniforms.uGlow=GLOW_U;sh.fragmentShader='uniform vec2 uGlow;\n'+sh.fragmentShader.replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb*=uGlow.x;').replace('#include <fog_fragment>','#ifdef USE_FOG\nfloat ff=1.0-exp(-fogDensity*fogDensity*vFogDepth*vFogDepth);gl_FragColor.rgb=mix(gl_FragColor.rgb,fogColor,ff*uGlow.y);\n#endif')};glowMat.customProgramCacheKey=()=>'glow-hdr';
 // --- Material system v0.2 (src/materials/level0.js, docs/MATERIALS.md). The Lambert materials above stay as the "legacy" baseline.
 // MATS is what chunk meshes are built with. ?materials=legacy starts on the original look; F8 toggles live (chunks are re-pointed, no rebuild).
+// --- Contact AO occupancy map (4C.3). World-space, toroidal 1024^2 RG8 texture, 0.25 m per texel (256 m period > the ~176 m of loaded chunks).
+// R = walls that reach the floor, G = walls/lintels that reach the ceiling (area coverage). Filled from each chunk's collision rects, so it is
+// deterministic and seamless across chunk borders; sampled by the shared Level 0 materials (src/materials/level0.js). ORIGINAL: uAO.x = 0 -> never sampled.
+const OCC_N=1024,OCC_S=.25,OCC_B=64,occTex=new THREE.DataTexture(new Uint8Array(OCC_N*OCC_N*2),OCC_N,OCC_N,THREE.RGFormat,THREE.UnsignedByteType);
+occTex.minFilter=occTex.magFilter=THREE.LinearFilter;occTex.wrapS=occTex.wrapT=THREE.RepeatWrapping;occTex.generateMipmaps=false;occTex.unpackAlignment=1;occTex.needsUpdate=true;
+const AO_U={tOcc:{value:occTex},uAO:{value:new THREE.Vector4(0,.6,.5,0)}},occRects=new Map(),occDirty=new Set(),occBlock=new DataTexture_(),occPos=new THREE.Vector2();
+function DataTexture_(){const t=new THREE.DataTexture(new Uint8Array(OCC_B*OCC_B*2),OCC_B,OCC_B,THREE.RGFormat,THREE.UnsignedByteType);t.unpackAlignment=1;t.generateMipmaps=false;t.minFilter=t.magFilter=THREE.NearestFilter;return t}
+const occMod=(v,m)=>((v%m)+m)%m;
+function occRaster(bx,bz){const d=occBlock.image.data,x0=bx*OCC_B*OCC_S,z0=bz*OCC_B*OCC_S,x1=x0+OCC_B*OCC_S,z1=z0+OCC_B*OCC_S;d.fill(0);
+  for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const rs=occRects.get((bx+a)+','+(bz+b));if(!rs)continue;
+    for(const r of rs){const ax0=Math.max(r.x-r.w/2,x0),ax1=Math.min(r.x+r.w/2,x1),az0=Math.max(r.z-r.d/2,z0),az1=Math.min(r.z+r.d/2,z1);if(ax0>=ax1||az0>=az1)continue;
+      const i0=Math.floor((ax0-x0)/OCC_S),i1=Math.min(OCC_B-1,Math.floor((ax1-x0-1e-6)/OCC_S)),j0=Math.floor((az0-z0)/OCC_S),j1=Math.min(OCC_B-1,Math.floor((az1-z0-1e-6)/OCC_S));
+      for(let j=j0;j<=j1;j++){const oz=Math.min(az1,z0+(j+1)*OCC_S)-Math.max(az0,z0+j*OCC_S);
+        for(let i=i0;i<=i1;i++){const c=(Math.min(ax1,x0+(i+1)*OCC_S)-Math.max(ax0,x0+i*OCC_S))*oz/(OCC_S*OCC_S)*255,k=(j*OCC_B+i)*2;
+          if(r.f)d[k]=Math.min(255,d[k]+c);d[k+1]=Math.min(255,d[k+1]+c)}}}}
+  occBlock.needsUpdate=true;occPos.set(occMod(bx*OCC_B,OCC_N),occMod(bz*OCC_B,OCC_N));renderer.copyTextureToTexture(occPos,occBlock,occTex)}
+function occMark(cx,cz){for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++)occDirty.add((cx+a)+','+(cz+b))}
+function occFlush(){let n=0;for(const id of occDirty){occDirty.delete(id);if(!occRects.has(id))continue;const [x,z]=id.split(',').map(Number);occRaster(x,z);if(++n>=12)break}}
 const MATS={wall:wallMat,floor:floorMat,ceil:ceilMat};let matSystem=null;
 try{const {createLevel0Materials}=await import('./src/materials/level0.js'),q=new URLSearchParams(location.search);
-  matSystem=createLevel0Materials(THREE,{renderer,H,ceilSize:[CEIL_W,CEIL_L],legacy:{wall:wallMat,floor:floorMat,ceil:ceilMat},procedural:{wall:wallTex,floor:floorTex,ceil:ceilTex},mode:q.get('materials'),manifestUrl:q.get('materialManifest')||undefined,
+  matSystem=createLevel0Materials(THREE,{renderer,H,aoUniforms:AO_U,ceilSize:[CEIL_W,CEIL_L],legacy:{wall:wallMat,floor:floorMat,ceil:ceilMat},procedural:{wall:wallTex,floor:floorTex,ceil:ceilTex},mode:q.get('materials'),manifestUrl:q.get('materialManifest')||undefined,
     onModeChange:active=>Object.assign(MATS,active)});Object.assign(MATS,matSystem.active);window.NULLROOMS_MATERIALS=matSystem;
 }catch(e){console.warn('Material system unavailable; using legacy materials',e)}
 const _box=new THREE.BoxGeometry(1,1,1),BP=_box.attributes.position.array,BN=_box.attributes.normal.array,BI=_box.index.array,_c=new THREE.Color();
 // Merges all boxes of a chunk into one lit + one glow geometry, baking ceiling-light pools into vertex colours.
 class Builder{
-  constructor(lights,dim=1){this.lights=lights;this.dim=dim;this.b={};for(const k of ['wall','floor','ceil','glow','grid'])this.b[k]={p:[],n:[],c:[],l:[],u:[],i:[]};this.walls=[]}
+  constructor(lights,dim=1){this.lights=lights;this.dim=dim;this.b={};for(const k of ['wall','floor','ceil','glow','grid'])this.b[k]={p:[],n:[],c:[],l:[],u:[],i:[],h:[]};this.walls=[];this.Hc=H}
   // kind: wall | floor | ceil | glow | grid. UVs are world-space so textures run seamlessly across merged boxes.
   // Wall V = py*vs+vo (default: one wallpaper repeat per H, baseboard at the floor).
   box(x,y,z,w,h,d,color,collide=false,kind='wall',vs=1/H,vo=0){
     const b=this.b[kind],glow=kind==='glow',base=b.p.length/3;_c.set(color);
     for(let v=0;v<24;v++){const nx=BN[v*3],ny=BN[v*3+1],px=BP[v*3]*w+x,py=BP[v*3+1]*h+y,pz=BP[v*3+2]*d+z;b.p.push(px,py,pz);b.n.push(nx,ny,BN[v*3+2]);
       let s=1;if(!glow){s=LIGHT.base[kind]??LIGHT.base.ceil;for(const L of this.lights){const dx=px-L.x,dy=py-L.y,dz=pz-L.z,q=dx*dx+dy*dy+dz*dz,w=1-q/(LIGHT.reach*LIGHT.reach);if(w>0)s+=LIGHT.gain*L.k*w*w/(1+q/LIGHT.soft)}s=shoulder(s)*this.dim}
-      b.c.push(_c.r*s,_c.g*s,_c.b*s);b.l.push(s); // l = light level alone (no palette hue), used by external textures
+      b.c.push(_c.r*s,_c.g*s,_c.b*s);b.h.push(this.Hc);b.l.push(s); // h = ceiling height of this chunk (AO); l = light level alone (no palette hue), used by external textures
       if(kind==='wall'){const vv=py*vs+vo;if(Math.abs(nx)>.5)b.u.push(pz/2,vv);else if(Math.abs(ny)>.5)b.u.push(px/2,pz/2);else b.u.push(px/2,vv)}else b.u.push(px/2,pz/2)}
     for(let i=0;i<36;i++)b.i.push(BI[i]+base);
     if(collide)this.walls.push({x,z,w,d})}
-  mesh(b,m){if(!b.p.length)return null;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(b.p,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(b.n,3));g.setAttribute('color',new THREE.Float32BufferAttribute(b.c,3));g.setAttribute('aLight',new THREE.Float32BufferAttribute(b.l,1));g.setAttribute('uv',new THREE.Float32BufferAttribute(b.u,2));g.setIndex(b.i);g.computeBoundingSphere();const o=new THREE.Mesh(g,m);o.matrixAutoUpdate=false;return o}
+  mesh(b,m){if(!b.p.length)return null;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(b.p,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(b.n,3));g.setAttribute('color',new THREE.Float32BufferAttribute(b.c,3));g.setAttribute('aLight',new THREE.Float32BufferAttribute(b.l,1));g.setAttribute('aHc',new THREE.Float32BufferAttribute(b.h,1));g.setAttribute('uv',new THREE.Float32BufferAttribute(b.u,2));g.setIndex(b.i);g.computeBoundingSphere();const o=new THREE.Mesh(g,m);o.matrixAutoUpdate=false;return o}
 }
 // Vertical wall slab from y0 to y1. Above the normal ceiling height the wallpaper is remapped so tall walls never repeat the baseboard.
 function slab(B,x,z,w,d,y0,y1,color){const lo=Math.min(y1,H);if(lo>y0+.001)B.box(x,(y0+lo)/2,z,w,lo-y0,d,color);
@@ -406,7 +428,7 @@ function wallRun(B,ax,line,a,b,h,v,color,ox,oz,ea=true,eb=true){const t=.3,s=a-(
 function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const L=layout(cx,cz),I=L.I,p=I.pal,ox=cx*N,oz=cz*N,Hc=I.Hc,wall=p.wall;
   // Baked light comes from this chunk's panels and any neighbouring panel close enough to reach in.
   const lights=[];for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++)for(const l of layout(cx+a,cz+b).lights)if(l.k>0&&l.x>ox-8&&l.x<ox+N+8&&l.z>oz-8&&l.z<oz+N+8)lights.push(l);
-  const B=new Builder(lights,I.sp==='dark'?LIGHT.dark:1);
+  const B=new Builder(lights,I.sp==='dark'?LIGHT.dark:1);B.Hc=Hc;
   for(let i=0;i<8;i++)for(let j=0;j<8;j++){B.box(ox+1+2*i,-.18,oz+1+2*j,2,.36,2,p.floor,false,'floor');B.box(ox+1+2*i,Hc+.18,oz+1+2*j,2,.36,2,p.ceil,false,'ceil')}
   // Walls on the lines this chunk owns: its north/west boundary (line 0) and every interior line. South/east belong to the neighbours.
   for(let ax=0;ax<2;ax++){const arr=ax?L.vw:L.hw,pa=GEN_LEGACY?null:(ax?layout(cx,cz-1).vw:layout(cx-1,cz).hw),na=GEN_LEGACY?null:(ax?layout(cx,cz+1).vw:layout(cx+1,cz).hw);
@@ -424,9 +446,10 @@ function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const L=lay
   {const gw=.024,gh=.004,gy=Hc-.0015,gc=_c.set(p.grid).multiplyScalar(.8).getHex();
    for(let k=0;k<N/CEIL_W;k++)for(let s=0;s<N;s+=2)B.box(ox+k*CEIL_W,gy,oz+s+1,gw,gh,2,gc,false,'grid');
    for(let k=0;k<N/CEIL_L;k++)for(let s=0;s<N;s+=2)B.box(ox+s+1,gy,oz+k*CEIL_L,2,gh,gw,gc,false,'grid')}
+  occRects.set(id,[...B.walls.map(w=>({...w,f:1})),...lint.map(([ax,line,a,b])=>{const m=(a+b)/2,l=b-a;return ax?{x:ox+line,z:oz+m,w:.3,d:l,f:0}:{x:ox+m,z:oz+line,w:l,d:.3,f:0}})]);occMark(cx,cz);
   const g=new THREE.Group();g.userData.walls=B.walls;for(const m of [B.mesh(B.b.wall,MATS.wall),B.mesh(B.b.floor,MATS.floor),B.mesh(B.b.ceil,MATS.ceil),B.mesh(B.b.glow,glowMat),B.mesh(B.b.grid,gridMat)])if(m){m.updateMatrix();g.add(m)}
   scene.add(g);chunks.set(id,g)}
-function removeChunk(id,g){scene.remove(g);g.traverse(o=>o.geometry&&o.geometry.dispose());chunks.delete(id)}
+function removeChunk(id,g){occRects.delete(id);{const [x,z]=id.split(',').map(Number);occMark(x,z)}scene.remove(g);g.traverse(o=>o.geometry&&o.geometry.dispose());chunks.delete(id)}
 const statusEl=document.querySelector('#status');let lastCx=NaN,lastCz=NaN,queue=[];
 function updateChunks(){const cx=Math.floor(camera.position.x/tile),cz=Math.floor(camera.position.z/tile);
 if(cx!==lastCx||cz!==lastCz){lastCx=cx;lastCz=cz;queue=[];
@@ -461,7 +484,7 @@ let hum,AUD=null,stepN=null,masterGain=null;
 let introDuck=1,lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
 const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100,introEnabled:1,introDuration:8,introFall:1,introShake:.35,introBreath:.25,introImpact:.5,introDuck:.6,envEnabled:1,envWear:8,envDamp:3,envCeil:2,envIntensity:25,envShow:0,
   visProfile:0,visPost:1,bloomOn:1,lampGain:4,lampFog:36,bloomThr:1,bloomInt:28,bloomSpread:96,
-  fogBright:65,fogDens:100,exposure:100,toneKnee:100,grSat:90,grBlue:90,grLift:50,grGain:92,grCon:110,showFps:0}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
+  fogBright:65,fogDens:100,exposure:100,toneKnee:100,grSat:90,grBlue:90,grLift:50,grGain:92,grCon:110,aoOn:1,aoInt:55,aoRad:60,lensDist:30,lensCA:40,grainShadow:60,showFps:0}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
 let devSaved={};try{devSaved=JSON.parse(localStorage.getItem('nullrooms.dev')||'{}')||{}}catch(e){}
 // VISUAL / RENDERING: one gain set per profile, so tuning Realistic never touches Original. Defaults are 100 % = the look the post shader always had.
 const VIS_FX=[['grain','Grain intensity','uGrain'],['vig','Vignette intensity','uVig'],['scan','Scanline intensity','uScan'],['halo','Halation intensity','uHalo'],['ca','Chromatic aberration','uCA']];
@@ -481,6 +504,9 @@ function applyVisual(){const u=vhsMat.uniforms,pre=visPrefix();u.uReal.value=dev
      scene.fog.density=.027*bv('fogDens',100)/100;scene.fog.color.copy(FOG_BASE).multiplyScalar(bv('fogBright',65)/100)}
    else{u.uExp.value=1;u.uTone.value=1;u.uGrade.value.set(.78,.92,1,1);u.uBlue.value=1;scene.fog.density=.027;scene.fog.color.copy(FOG_BASE)}
    scene.background.copy(scene.fog.color)}
+  {const R=devValues.visProfile===1,bv=(k,d)=>{const v=Number(devValues[k]);return Number.isFinite(v)?v:d};
+   AO_U.uAO.value.set(R&&Number(devValues.aoOn)!==0?bv('aoInt',55)/100:0,bv('aoRad',60)/100,.5,0);
+   u.uLens.value=R?bv('lensDist',30)/100*.06:0;u.uCAr.value=R?bv('lensCA',40)/100*.006:0;u.uGrainL.value=R?bv('grainShadow',60)/100:0}
   for(const [k,,uni] of VIS_FX){const v=Number(devValues[pre+k]);u[uni].value=(Number.isFinite(v)?Math.max(0,Math.min(200,v)):100)/100}}
 applyVisual();
 function applyDevGains(){if(!devGains)return;for(const k of ['hum','footsteps','breathing','cough'])devGains[k].gain.value=devScale(k)*(k==='hum'?introDuck:1);devGains.reverb.gain.value=.09*devScale('reverb')}
@@ -888,6 +914,17 @@ const GRADE_CFG=[['fogBright','Fog colour brightness (lower = distance goes dark
   const sync=()=>{input.value=gv(key);out.textContent=gv(key).toFixed(dec)+suffix};devSync.push(sync);sync();
   input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};row.append(cap,input,out);devControls.append(row)}
  const rb=document.createElement('button');rb.textContent='RESET FOG / GRADE';rb.onclick=()=>{for(const [k] of GRADE_CFG)devValues[k]=DEV_DEFAULT[k];save();devSync.forEach(fn=>fn())};devControls.append(rb)}
+// AMBIENT OCCLUSION & OPTICS (4C.3): REALISTIC profile only (ORIGINAL ignores all of these). All live uniform writes: no rebuild, no recompile.
+const AO_CFG=[['aoInt','AO intensity (max darkening at contacts)',0,100,1,0,'%'],['aoRad','AO radius (reach from wall/ceiling/floor contact)',20,120,5,0,' cm'],['lensDist','Lens distortion (barrel)',0,100,1,0,'%'],['lensCA','Lens chromatic aberration (radial)',0,100,1,0,'%'],['grainShadow','Grain: stronger in shadows (sensor-like)',0,100,1,0,'%']];
+{const h=document.createElement('h3');h.textContent='AMBIENT OCCLUSION & OPTICS (REALISTIC ONLY)';devControls.append(h);
+ const save=()=>{applyVisual();visSave()},av=k=>{const v=Number(devValues[k]);return Number.isFinite(v)?v:DEV_DEFAULT[k]};
+ const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';en.append(cb,' Ambient occlusion enabled');
+ cb.onchange=()=>{devValues.aoOn=cb.checked?1:0;save()};devSync.push(()=>{cb.checked=!!Number(devValues.aoOn)});cb.checked=!!Number(devValues.aoOn);devControls.append(en);
+ for(const [key,label,min,max,step,dec,suffix] of AO_CFG){const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output');
+  cap.textContent=label;input.type='range';input.min=min;input.max=max;input.step=step;
+  const sync=()=>{input.value=av(key);out.textContent=av(key).toFixed(dec)+suffix};devSync.push(sync);sync();
+  input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};row.append(cap,input,out);devControls.append(row)}
+ const rb=document.createElement('button');rb.textContent='RESET AO / OPTICS';rb.onclick=()=>{for(const [k] of AO_CFG)devValues[k]=DEV_DEFAULT[k];devValues.aoOn=1;save();devSync.forEach(fn=>fn())};devControls.append(rb)}
 addEventListener('keydown',e=>{if(e.code==='F4'){e.preventDefault();setVisProfile(devValues.visProfile?0:1)}});
 const devPadInvert=document.querySelector('#devPadInvert');devSync.push(()=>{devPadInvert.checked=!!settings.padInvertY});devPadInvert.onchange=()=>{settings.padInvertY=devPadInvert.checked;applySettings();document.getElementById('padInvertY').checked=settings.padInvertY};
 function devRefresh(){devSync.forEach(fn=>fn());document.querySelector('#devStatus').textContent='Audio: '+(AUD?.ctx.state||'not started')+' | '+['footsteps','breathing_idle','cough'].map(k=>k+': '+(audioBuffers[k]?.length?'file':'fallback')).join(' / ')}
@@ -926,5 +963,5 @@ function handheld(now,dt,moving,running){const t=now/1000;moveAmt+=((moving?1:0)
   const f=settings.fov+(settings.bob?Math.sin(t*.4)*.8+Math.sin(t*1.3)*.4-runAmt*3-jolt*1.5:0);if(Math.abs(camera.fov-f)>.01){camera.fov=f;camera.updateProjectionMatrix()}
   vhsMat.uniforms.shake.value=jolt+runAmt*.5+coughPulse*.18}
 let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);sampleFps(now);const dt=Math.min((now-last)/1000,.05);last=now;pollGamepad(dt);const run=keys.has('ShiftLeft')||keys.has('ShiftRight')||padState.sprint;if(devOpen&&now-padDevAt>100){padDevAt=now;document.querySelector('#devPad').textContent=padDebugText(now)}if(playing&&!intro.active){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'))+padState.my;const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'))+padState.mx;if(f||s){const len=Math.hypot(f,s),speed=(run?4.6:2.5)*Math.min(1,len)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(run?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(run)}else {lastFootstep=0;camera.position.y+=(1.7-camera.position.y)*.12}}updateChunks();if(DBG_MAP)drawMap(now);ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&!intro.active&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight')||padState.mx!==0||padState.my!==0);handheld(now,dt,mv,mv&&(run));introTick(dt);breathe();
-vhsMat.uniforms.time.value=now/1000%1000;renderer.setRenderTarget(rt);renderer.render(scene,camera);bloomPass();renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();while(queue.length)updateChunks();{const [x,z]=findSpawn();camera.position.set(x,1.7,z)}requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
+vhsMat.uniforms.time.value=now/1000%1000;occFlush();renderer.setRenderTarget(rt);renderer.render(scene,camera);bloomPass();renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();while(queue.length)updateChunks();{const [x,z]=findSpawn();camera.position.set(x,1.7,z)}requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
 </script></body></html>

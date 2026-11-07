@@ -202,6 +202,36 @@ const GLSL_ENV_APPLY = /* glsl */`
 {float em;vec3 ed;vec3 et=envDetail(vMacroP,vEnvN,em,ed);diffuseColor.rgb*=et;
  if(uEnvI.y>.5&&em>.02)diffuseColor.rgb=mix(diffuseColor.rgb,ed,clamp(em*2.,0.,1.));}
 `;
+const GLSL_AO = /* glsl */`
+// Contact ambient occlusion (4C.3, REALISTIC only: uAO.x = 0 skips everything, so ORIGINAL is untouched). Analytic, no screen-space
+// pass: floor/ceiling read a world-space occupancy map (R = walls reaching the floor, G = walls/lintels reaching the ceiling, 0.25 m texels,
+// toroidal, filled per chunk in index.html), walls use height above floor / below ceiling plus the map for inside corners.
+uniform sampler2D tOcc; uniform vec4 uAO; varying float vAoH;
+float aoT(vec2 p,bool up){vec2 t=texture2D(tOcc,p*(1./256.)).rg;return up?t.r:t.g;}
+float aoFactor(vec3 P,vec3 N){
+  float R=uAO.y,ao=0.;
+  #if defined(ENV_FLOOR) || defined(ENV_CEIL)
+  if(abs(N.y)>.5){
+    bool up=N.y>0.;vec2 q=P.xz,a=vec2(.5*R,0.),b=vec2(0.,.5*R),d=vec2(.7071*R),e=vec2(.7071*R,-.7071*R);
+    float s=aoT(q,up)*.16+(aoT(q+a,up)+aoT(q-a,up)+aoT(q+b,up)+aoT(q-b,up))*.12+(aoT(q+d,up)+aoT(q-d,up)+aoT(q+e,up)+aoT(q-e,up))*.09;
+    ao=smoothstep(0.,.55,s);
+  }
+  #endif
+  #ifdef ENV_WALL
+  if(abs(N.y)<.5){
+    float y=P.y,vf=1.-smoothstep(0.,R*.9,y),vc=1.-smoothstep(0.,R*.9,vAoH-y);vf*=vf;vc*=vc;
+    bool up=y<2.;vec2 o=P.xz+N.xz*uAO.z,t=vec2(N.z,-N.x);
+    float c=0.;
+    for(int i=0;i<3;i++){float l=R*(i==0?.3:i==1?.6:.95),w=i==0?.4:i==1?.35:.25;c+=w*max(aoT(o+t*l,up),aoT(o-t*l,up));}
+    ao=1.-(1.-vf*.8)*(1.-vc*.8)*(1.-smoothstep(0.,.6,c)*.9);
+  }
+  #endif
+  return ao;
+}
+`;
+const GLSL_AO_APPLY = /* glsl */`
+if(uAO.x>0.)diffuseColor.rgb*=1.-uAO.x*aoFactor(vMacroP,vEnvN);
+`;
 const GLSL_COLOR = /* glsl */`
 float macroV=macroField(vMacroP);
 #ifdef USE_COLOR
@@ -226,10 +256,10 @@ function makePbrMaterial(THREE, kind, def, tex, envU) {
   m.userData.uniforms = u;
   m.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, u, envU);
-    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vMacroP; attribute float aLight; varying float vLight; varying vec3 vEnvN;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvMacroP=position; vLight=aLight; vEnvN=normal;');
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vMacroP; attribute float aLight; attribute float aHc; varying float vAoH; varying float vLight; varying vec3 vEnvN;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvMacroP=position; vLight=aLight; vEnvN=normal; vAoH=aHc;');
     shader.fragmentShader = (def.macro.plane === 'wall' ? '#define MACRO_WALL\n' : '') + '#define ENV_' + kind.toUpperCase() + '\n' + shader.fragmentShader
-      .replace('#include <common>', '#include <common>\n' + GLSL_COMMON + GLSL_ENV)
-      .replace('#include <color_fragment>', GLSL_COLOR + GLSL_ENV_APPLY)
+      .replace('#include <common>', '#include <common>\n' + GLSL_COMMON + GLSL_ENV + GLSL_AO)
+      .replace('#include <color_fragment>', GLSL_COLOR + GLSL_ENV_APPLY + GLSL_AO_APPLY)
       .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.directSpecular*=uSpec;reflectedLight.indirectSpecular*=uSpec;')
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n' + GLSL_ROUGH);
   };
@@ -254,7 +284,7 @@ export function createLevel0Materials(THREE, opts) {
   const manifestUrl = new URL(opts.manifestUrl || 'assets/textures/level0/manifest.json', document.baseURI).href;
   const aniso = renderer.capabilities.getMaxAnisotropy();
   const defs = {}, pbr = {}, tex = {}, state = {}, kindOf = new Map(), scaled = {};
-  const env = { ...ENV_DEFAULTS }, envU = { uEnvF: { value: new THREE.Vector4() }, uEnvI: { value: new THREE.Vector2() } }; // shared by all three materials: no recompiles, live
+  const env = { ...ENV_DEFAULTS }, envU = { uEnvF: { value: new THREE.Vector4() }, uEnvI: { value: new THREE.Vector2() }, ...(opts.aoUniforms || {}) }; // shared by all three materials: no recompiles, live
   const applyEnv = () => { envU.uEnvF.value.set(env.enabled ? 1 : 0, env.wear, env.damp, env.ceil); envU.uEnvI.value.set(env.intensity, env.show ? 1 : 0); };
   applyEnv();
 
