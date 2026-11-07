@@ -10,7 +10,7 @@ export function loadGen({legacy=false,file=join(root,'index.html')}={}){
   const html=readFileSync(file,'utf8'),a=html.indexOf('// --- GEN START'),b=html.indexOf('// --- GEN END');
   if(a<0||b<0)throw new Error('GEN START/END markers not found in index.html');
   const body=html.slice(a,b);
-  const names=['N','tile','H','info','layout','edgeOpen','infoCache','layoutCache','regCache','RS'];
+  const names=['N','tile','H','info','layout','edgeOpen','infoCache','layoutCache','regCache','RS','regionAt','region','regionEpoch','setRegionEpoch'];
   const f=new Function('GEN_LEGACY',body+'\nreturn {'+names.map(n=>`${n}:typeof ${n}!=="undefined"?${n}:undefined`).join(',')+'};');
   return f(legacy);
 }

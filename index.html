@@ -249,9 +249,16 @@ function layoutLegacy(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L)r
 //     extra doors (loops). Then the odd missing wall, interior window, wide breach in a very long wall, and free-standing partition.
 const RS=48,regCache=new Map(),xoff=rz=>N*Math.floor(hash(rz,0,900)*(RS/N));
 const regionAt=(cx,cz)=>{const rz=Math.floor(cz*N/RS);return [Math.floor((cx*N-xoff(rz))/RS),rz]};
+// Region epochs (docs/WORLDGEN.md, "Region epochs"). A region's rooms, doors, partitions and lamp states are seeded by (rx, rz, epoch).
+// Epoch 0 = the original world, bit-identical to before epochs existed (es() leaves the seed untouched). Zones, palettes, ceiling
+// heights, corridors and chunk-border openings stay epoch-independent. A chunk's layout depends only on its OWN region's epoch, so
+// changing an epoch is safe once that region and a 1-chunk ring around it hold no built chunk (dependency radius of addChunk = 1).
+// Caches are self-invalidating: region() and layout() rebuild when the stored epoch differs. Nothing changes an epoch yet.
+const regEpoch=new Map(),regionEpoch=(rx,rz)=>regEpoch.get(rx+','+rz)||0,es=(s,e)=>e?s+0x10000*(e&0x7fff):s;
+function setRegionEpoch(rx,rz,e){e=Math.max(0,Math.floor(e)||0)&0x7fff;const id=rx+','+rz;if(e)regEpoch.set(id,e);else regEpoch.delete(id)}
 const roomParams=I=>I.kind==='maze'?{m:2,g:2,T:7,big:.04,extra:.18}:I.kind==='closets'?{m:2,g:2,T:5,big:0,extra:.5}:{m:3,g:4,T:18+Math.max(0,.68-I.n)/.36*52,big:.12,extra:.3};
-function region(rx,rz){const id=rx+','+rz;let R=regCache.get(id);if(R)return R;
-  const S=RS,ox=rx*S+xoff(rz),oz=rz*S,r=rng(rx,rz,1000),lab=new Int16Array(S*S),cinfo=(x,z)=>info(Math.floor((ox+x)/N),Math.floor((oz+z)/N));
+function region(rx,rz){const id=rx+','+rz,ep=regionEpoch(rx,rz);let R=regCache.get(id);if(R&&R.ep===ep)return R;
+  const S=RS,ox=rx*S+xoff(rz),oz=rz*S,r=rng(rx,rz,es(1000,ep)),lab=new Int16Array(S*S),cinfo=(x,z)=>info(Math.floor((ox+x)/N),Math.floor((oz+z)/N));
   const rects=[];let nid=1;
   function par(x0,z0,x1,z1){let T=1e9,m=9,g=4,any=false;
     for(let cz=Math.floor((oz+z0)/N);cz<=Math.floor((oz+z1-1)/N);cz++)for(let cx=Math.floor((ox+x0)/N);cx<=Math.floor((ox+x1-1)/N);cx++){const I=info(cx,cz);if(I.open)continue;any=true;const p=roomParams(I);T=Math.min(T,p.T);m=Math.min(m,p.m);g=Math.min(g,p.g)}
@@ -286,7 +293,7 @@ function region(rx,rz){const id=rx+','+rz;let R=regCache.get(id);if(R)return R;
   const hw=new Uint8Array((S+1)*S),vw=new Uint8Array((S+1)*S),lint=[];
   for(let z=1;z<S;z++)for(let x=0;x<S;x++)hw[z*S+x]=cm[(z-1)*S+x]!==cm[z*S+x]?1:0;
   for(let x=1;x<S;x++)for(let z=0;z<S;z++)vw[x*S+z]=cm[z*S+x-1]!==cm[z*S+x]?1:0;
-  const edge=d=>{const e=rng(rx,rz,1100+d),o=new Uint8Array(S);let pos=0,op=e()<.5;while(pos<S){const len=3+Math.floor(e()*(op?7:8)),end=Math.min(S,pos+len);if(op)for(let i=pos;i<end;i++)o[i]=1;pos=end;op=!op}
+  const edge=d=>{const e=rng(rx,rz,es(1100+d,ep)),o=new Uint8Array(S);let pos=0,op=e()<.5;while(pos<S){const len=3+Math.floor(e()*(op?7:8)),end=Math.min(S,pos+len);if(op)for(let i=pos;i<end;i++)o[i]=1;pos=end;op=!op}
     if(!o.some(v=>v))for(let i=9;i<13;i++)o[i]=1;return o};
   {const a=edge(0),b=edge(1);for(let i=0;i<S;i++){hw[i]=a[i]^1;vw[i]=b[i]^1}}
   const scan=()=>{const out=[];for(let ax=0;ax<2;ax++){const arr=ax?vw:hw;for(let line=1;line<S;line++){let cur=null;
@@ -316,7 +323,7 @@ function region(rx,rz){const id=rx+','+rz;let R=regCache.get(id);if(R)return R;
     for(let z=z0;z<z1&&same;z++)for(let x=x0;x<x1;x++)if(cm[z*S+x]!==c0){same=false;break}
     const vert=r()<.5,ln=vert?x0+3+Math.floor(r()*(x1-x0-5)):z0+3+Math.floor(r()*(z1-z0-5));
     if(same){if(vert){for(let z=z0+2;z<z1-2;z++)vw[ln*S+z]=1}else for(let x=x0+2;x<x1-2;x++)hw[ln*S+x]=1}}
-  R={ox,oz,hw,vw,cm,cobst,lint};regCache.set(id,R);return R}
+  R={ox,oz,hw,vw,cm,cobst,lint,ep};regCache.set(id,R);return R}
 function layoutNew(cx,cz){const I=info(cx,cz),[rx,rz]=regionAt(cx,cz),R=region(rx,rz),S=RS,lx0=cx*N-R.ox,lz0=cz*N-R.oz,
     hw=new Uint8Array((N+1)*N),vw=new Uint8Array((N+1)*N),lab=new Int16Array(N*N),pillars=[],lint=[],
     E=[edgeOpen(0,cx,cz,1),edgeOpen(1,cx,cz,1),edgeOpen(0,cx,cz+1,1),edgeOpen(1,cx+1,cz,1)];
@@ -332,12 +339,12 @@ function layoutNew(cx,cz){const I=info(cx,cz),[rx,rz]=regionAt(cx,cz),R=region(r
   for(const [ax,line,a,b] of R.lint){const l=ax?line-lx0:line-lz0,o=ax?lz0:lx0;if(l<0||l>=N)continue;const arr=ax?vw:hw;
     for(let i=Math.max(a,o);i<Math.min(b,o+N);){if(arr[l*N+i-o]){i++;continue}let j=i;while(j<Math.min(b,o+N)&&!arr[l*N+j-o])j++;lint.push([ax,l,i-o,j-o]);i=j}}
   const lights=[],roomOff=new Map();
-  for(let i=0;i<4;i++)for(let j=0;j<4;j++){const lx=1+4*i,lz=1+4*j,c=lab[lz*N+lx],h=hash(cx*4+i,cz*4+j,620),ob=R.cobst[c],key=ob?0:c;
-    if(!roomOff.has(key))roomOff.set(key,hash(ob?cx*64:rx*5003+c,ob?cz:rz+777,610)<.07);
+  for(let i=0;i<4;i++)for(let j=0;j<4;j++){const lx=1+4*i,lz=1+4*j,c=lab[lz*N+lx],h=hash(cx*4+i,cz*4+j,es(620,R.ep)),ob=R.cobst[c],key=ob?0:c;
+    if(!roomOff.has(key))roomOff.set(key,hash(ob?cx*64:rx*5003+c,ob?cz:rz+777,es(610,R.ep))<.07);
     let k=.5,col=0xfffaec;if(I.sp==='dark'?h<.9:(h<.07||roomOff.get(key))){k=0;col=0x76756a}else if(I.sp==='dark'||h<.16){k=.12;col=0xb4b2a2}
     lights.push({x:cx*N+lx+.25,y:I.Hc-.05,z:cz*N+lz+.5,k,c:col})}
-  return {I,E,hw,vw,lint,pillars,lights}}
-function layout(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L)return L;L=GEN_LEGACY?layoutLegacy(cx,cz):layoutNew(cx,cz);layoutCache.set(id,L);return L}
+  return {I,E,hw,vw,lint,pillars,lights,ep:R.ep}}
+function layout(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L&&(GEN_LEGACY||L.ep===regionEpoch(...regionAt(cx,cz))))return L;L=GEN_LEGACY?layoutLegacy(cx,cz):layoutNew(cx,cz);layoutCache.set(id,L);return L}
 // --- GEN END
 // Shared materials: Lambert + vertex colours is far cheaper than Standard; "glow" panels ignore lighting.
 // Procedural canvas textures (no asset files). Kept near-white so the palette colours (vertex colours) tint them.

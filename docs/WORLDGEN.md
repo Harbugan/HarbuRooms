@@ -61,6 +61,7 @@ Reading the numbers honestly:
 ```
 node tools/gen-check.mjs --compare --radius 9     # determinism, boundary agreement, playability, statistics (legacy vs current)
 node tools/gen-map.mjs out.svg --radius 4         # top-down SVG map; --legacy, --cx/--cz, --scale, --no-grid, --mark x,z
+node tools/gen-check.mjs --epochs --radius 9 --runs 4 --baseline old-index.html   # region epochs, see below
 ```
 Both load the generator straight from `index.html` (the block between `GEN START` and `GEN END`). `tools/gen-lib.mjs`
 `chunkBoxes()` repeats the collision-box logic of `addChunk()`/`wallRun()`: if that changes, change it there too.
@@ -70,3 +71,42 @@ Both load the generator straight from `index.html` (the block between `GEN START
 * No real-GPU, real-browser play-through. Look for: wall seams at chunk borders (should be none), z-fighting, odd corners where
   a corridor meets a room, rooms that feel too big/small, and performance when crossing region borders.
 * Light interaction: lamp positions are untouched, but "whole room dark" (7 %) now follows the new rooms.
+
+## Region epochs (continuous-world step 0 + 1)
+
+Foundation for a world that can forget and rebuild areas the player has left. **Nothing changes an epoch yet**, so the game is
+unchanged; retiring regions is a later step.
+
+* Every region has an **epoch** (default 0). `regionEpoch(rx, rz)` / `setRegionEpoch(rx, rz, e)` in the `GEN` block.
+* The epoch salts the region's seeds: BSP, doors, windows, partitions, the region's N/W border openings (`edge()`) and the lamp
+  states of its chunks (dead/dim panels, dark rooms). `es(seed, 0) === seed`, so **epoch 0 is bit-identical** to the world before.
+* Epoch-independent on purpose (first version = room structure only): zones and specials (`info`), palettes, ceiling heights,
+  long corridors, chunk-border openings (`edgeOpen`), hall pillars and free-standing hall walls. The fixed start area therefore
+  only needs its regions pinned to epoch 0.
+* **Locality:** a chunk's layout depends only on its own region's epoch; its geometry, baked light and AO only on the epochs of
+  its 3 x 3 chunk neighbourhood (`addChunk` reads neighbour layouts at most one chunk away). So an epoch may change only while
+  that region and a one-chunk ring around it hold no built or queued chunk; then no visible chunk ever sees a changed input.
+* Caches self-invalidate: `region()` and `layout()` rebuild when the cached epoch differs from the current one.
+
+`gen-check --epochs` checks: epoch 0 against a baseline `index.html`; set + reset of epochs on a live generator; then for
+`--runs` random epoch tables (`--max-epoch`, `--seed`): locality of layouts and of collision boxes, determinism, boundary agreement,
+playability and openings on region borders (`regionBorders`: border segments without an opening of at least 2 cells).
+
+Measured (radius 9, 400 chunks, 51 regions; 4 runs seed 1-4 max epoch 3, and 12 runs seed 100-111 max epoch 9):
+
+| Check | Result |
+| --- | --- |
+| Epoch 0 vs `main` | 400 / 400 chunks bit-identical; `--compare` output identical except the new `regionBorders` field |
+| Cache set/reset on a live generator | ok |
+| Locality (layouts / collision boxes) | ok in all 16 runs |
+| Determinism, boundary agreement | ok in all 16 runs |
+| Region border segments without a passable opening | 0 of 50 in every run (narrowest best opening: 3 cells) |
+| Unreachable pockets away from the window edge | 0 in 15 runs; 1 run: one 2 m2 pocket (maze zone) |
+
+**Known, pre-existing:** the unreachable pocket is not caused by epochs. The unchanged `main` generator has them too once the test
+window is larger: radius 16 finds two 2 m2 pockets, radius 24 also a 6 m2 and a 73 m2 one, all in `maze` zones (radius 9, the
+area measured earlier, happens to contain none). Likely a room or door that is only one cell (0.7 m clear) wide somewhere after
+corridor stamping / sliver merging, not yet diagnosed. A sealed pocket cannot trap the player today, but a region that is not
+internally connected could, once neighbouring regions are rebuilt; this must be fixed before epochs are changed in game.
+Fixing it changes the epoch-0 world, so it is a separate, approved step.
+
