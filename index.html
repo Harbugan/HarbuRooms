@@ -375,6 +375,28 @@ function layoutNew(cx,cz){const I=info(cx,cz),[rx,rz]=regionAt(cx,cz),R=region(r
     lights.push({x:cx*N+lx+.25,y:I.Hc-.05,z:cz*N+lz+.5,k,c:col})}
   return {I,E,hw,vw,lint,pillars,lights,ep:R.ep}}
 function layout(cx,cz){const id=cx+','+cz;let L=layoutCache.get(id);if(L&&(GEN_LEGACY||L.ep===regionEpoch(...regionAt(cx,cz))))return L;L=GEN_LEGACY?layoutLegacy(cx,cz):layoutNew(cx,cz);layoutCache.set(id,L);return L}
+// Region retirement (docs/WORLDGEN.md, "Region retirement"). The chunks of a region: 3 x 3, from its origin (pure, no region build).
+const regionChunks=(rx,rz)=>{const cx0=(rx*RS+xoff(rz))/N,cz0=rz*RS/N,out=[];for(let b=0;b<RS/N;b++)for(let a=0;a<RS/N;a++)out.push([cx0+a,cz0+b]);return out};
+// Tracks regions that have had a built chunk and decides when one may be rebuilt with a new epoch ("retirable"):
+//  * not pinned (start area);
+//  * neither the region nor a one-chunk ring around it holds a built or queued chunk (busy(cx,cz)) - the dependency radius of a
+//    built chunk is one chunk, so no built chunk can ever see the change;
+//  * its nearest chunk is at least `dist` chunks (Chebyshev) from the player's chunk, and both have held for `delay` seconds.
+// Returning to it (a ring chunk gets built) resets the timer. update() returns the regions that became retirable on this call;
+// the caller decides what to do (dry run: log only; later: bump the epoch and forget()). Entries are capped at `cap`.
+function regenTracker(cap=512){const T=new Map();
+  return {T,
+    seen(cx,cz){const [rx,rz]=regionAt(cx,cz);if(isPinnedRegion(rx,rz))return;const id=rx+','+rz;let e=T.get(id);
+      if(!e){T.set(id,e={rx,rz,since:-1,ret:false});if(T.size>cap)for(const [k,v] of T)if(v.ret||T.size>cap*2){T.delete(k);if(T.size<=cap)break}}e.since=-1;e.ret=false},
+    forget(rx,rz){T.delete(rx+','+rz)},
+    update(now,pcx,pcz,busy,dist,delay){const out=[];
+      for(const e of T.values()){const ch=regionChunks(e.rx,e.rz);let d=1e9,b=false;
+        for(const [x,z] of ch)d=Math.min(d,Math.max(Math.abs(x-pcx),Math.abs(z-pcz)));
+        if(d>=dist){const x0=ch[0][0]-1,z0=ch[0][1]-1,n=RS/N+2;for(let j=0;j<n&&!b;j++)for(let i=0;i<n;i++)if(busy(x0+i,z0+j)){b=true;break}}
+        if(d<dist||b){e.since=-1;e.ret=false;continue}
+        if(e.since<0)e.since=now;if(!e.ret&&now-e.since>=delay){e.ret=true;out.push({rx:e.rx,rz:e.rz,epoch:regionEpoch(e.rx,e.rz),dist:d})}}
+      return out},
+    stats(){let u=0,r=0;for(const e of T.values()){if(e.ret)r++;else if(e.since>=0)u++}return {tracked:T.size,waiting:u,retirable:r}}}}
 // Start-room mark (docs/WORLDGEN.md, "Start area"): where the painted decal goes. Pure and deterministic (the start regions are
 // pinned to epoch 0). The spawn room is the region room under SPAWN_CELL; candidates are 2-cell stretches of full-height wall
 // (no window) facing into that room, with no wall touching the middle vertex from the room side, seen from the spawn without a wall
@@ -503,7 +525,7 @@ function decalGeometry(){const M=START_DECAL,h=decalVal('decalH')/100,w=h*DECAL_
 function decalAttach(g,lights,dim){decal={group:g,lights,dim,mesh:null};const m=new THREE.Mesh(decalGeometry(),decalMat);m.matrixAutoUpdate=false;m.renderOrder=1;decal.mesh=m;g.add(m);applyDecal()}
 function applyDecal(){decalMat.opacity=decalVal('decalOpacity')/100;decalMat.color.setScalar(decalVal('decalGain')/100);
   if(!decal)return;const geo=decalGeometry();decal.mesh.geometry.dispose();decal.mesh.geometry=geo;decal.mesh.visible=!!decalMat.map&&Number(devValues.decalOn)!==0}
-function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const L=layout(cx,cz),I=L.I,p=I.pal,ox=cx*N,oz=cz*N,Hc=I.Hc,wall=p.wall;
+function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;regen.seen(cx,cz);const L=layout(cx,cz),I=L.I,p=I.pal,ox=cx*N,oz=cz*N,Hc=I.Hc,wall=p.wall;
   // Baked light comes from this chunk's panels and any neighbouring panel close enough to reach in.
   const lights=[];for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++)for(const l of layout(cx+a,cz+b).lights)if(l.k>0&&l.x>ox-8&&l.x<ox+N+8&&l.z>oz-8&&l.z<oz+N+8)lights.push(l);
   const B=new Builder(lights,I.sp==='dark'?LIGHT.dark:1);B.Hc=Hc;
@@ -529,6 +551,13 @@ function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;const L=lay
   scene.add(g);chunks.set(id,g)}
 function removeChunk(id,g){if(decal&&decal.group===g)decal=null;occRects.delete(id);{const [x,z]=id.split(',').map(Number);occMark(x,z)}scene.remove(g);g.traverse(o=>o.geometry&&o.geometry.dispose());chunks.delete(id)}
 const statusEl=document.querySelector('#status');let lastCx=NaN,lastCz=NaN,queue=[];
+// Region retirement, DRY RUN (continuous-world step 3): decides which regions could be rebuilt, logs them, changes nothing.
+// F3 "WORLD REGEN (DRY RUN)" sets distance/delay and logging. Checked once a second; busy = built or queued chunk.
+const regen=regenTracker();let regenAt=0,regenEvents=0,regenStat=null;
+function regenTick(now,cx,cz){if(now-regenAt<1000)return;regenAt=now;const q=new Set(queue.map(([x,z])=>x+','+z)),busy=(x,z)=>chunks.has(x+','+z)||q.has(x+','+z);
+  for(const r of regen.update(now/1000,cx,cz,busy,devValues.regenDist??DEV_DEFAULT.regenDist,devValues.regenDelay??DEV_DEFAULT.regenDelay)){regenEvents++;
+    if(Number(devValues.regenLog))console.info(`[regen dry run] region ${r.rx},${r.rz} would be rebuilt (epoch ${r.epoch} -> ${r.epoch+1}); nearest chunk ${r.dist} chunks away`)}
+  if(devOpen&&regenStat)regenStat()}
 function updateChunks(){const cx=Math.floor(camera.position.x/tile),cz=Math.floor(camera.position.z/tile);
 if(cx!==lastCx||cz!==lastCz){lastCx=cx;lastCz=cz;queue=[];
   for(let x=cx-range;x<=cx+range;x++)for(let z=cz-range;z<=cz+range;z++)if(!chunks.has(x+','+z))queue.push([x,z]);
@@ -539,7 +568,7 @@ if(cx!==lastCx||cz!==lastCz){lastCx=cx;lastCz=cz;queue=[];
   for(const c of [layoutCache,infoCache])for(const id of c.keys()){const [x,z]=id.split(',').map(Number);if(Math.abs(x-cx)>range+4||Math.abs(z-cz)>range+4)c.delete(id)}
   for(const id of regCache.keys()){const [x,z]=id.split(',').map(Number);if(Math.abs((x*RS+xoff(z)+RS/2)/N-cx)>range+6||Math.abs((z*RS+RS/2)/N-cz)>range+6)regCache.delete(id)}
   statusEl.textContent=`SECTOR ${cx},${cz} · ${info(cx,cz).name}`}
-for(let n=0;n<2&&queue.length;n++){const [x,z]=queue.pop();addChunk(x,z)}}
+for(let n=0;n<2&&queue.length;n++){const [x,z]=queue.pop();addChunk(x,z)}if(!GEN_LEGACY)regenTick(performance.now(),cx,cz)}
 // Debug (?debug=map): top-down map of the 7 x 7 chunks around the player (walls dark, windows blue, pillars green, ceiling panels
 // yellow, chunk borders dashed red) for judging the generator without walking around. Does nothing without the parameter.
 const DBG_MAP=new URLSearchParams(location.search).get('debug')==='map';let mapCtx=null,mapAt=0;
@@ -562,7 +591,7 @@ let hum,AUD=null,stepN=null,masterGain=null;
 let introDuck=1,lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
 const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100,introEnabled:1,introDuration:8,introFall:1,introShake:.35,introBreath:.25,introImpact:.5,introDuck:.6,envEnabled:1,envWear:8,envDamp:3,envCeil:2,envIntensity:25,envShow:0,
   visProfile:0,visPost:1,bloomOn:1,lampGain:4,lampFog:36,bloomThr:1,bloomInt:28,bloomSpread:96,
-  fogBright:65,fogDens:100,exposure:100,toneKnee:100,grSat:90,grBlue:90,grLift:50,grGain:92,grCon:110,aoOn:1,aoInt:55,aoRad:60,lensDist:30,lensCA:40,grainShadow:60,showFps:0,decalOn:1,decalH:120,decalY:145,decalOpacity:100,decalGain:100}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
+  fogBright:65,fogDens:100,exposure:100,toneKnee:100,grSat:90,grBlue:90,grLift:50,grGain:92,grCon:110,aoOn:1,aoInt:55,aoRad:60,lensDist:30,lensCA:40,grainShadow:60,showFps:0,regenLog:0,regenDist:8,regenDelay:20,decalOn:1,decalH:120,decalY:145,decalOpacity:100,decalGain:100}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
 let devSaved={};try{devSaved=JSON.parse(localStorage.getItem('nullrooms.dev')||'{}')||{}}catch(e){}
 // VISUAL / RENDERING: one gain set per profile, so tuning Realistic never touches Original. Defaults are 100 % = the look the post shader always had.
 const VIS_FX=[['grain','Grain intensity','uGrain'],['vig','Vignette intensity','uVig'],['scan','Scanline intensity','uScan'],['halo','Halation intensity','uHalo'],['ca','Chromatic aberration','uCA']];
@@ -956,6 +985,20 @@ function applyEnv(){matSystem?.setEnvironment({enabled:Number(devValues.envEnabl
   input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};
   row.append(cap,input,out);devControls.append(row)}
  applyEnv()}
+// Region retirement dry run (docs/WORLDGEN.md): only decides and logs; changes no epoch, so the world is unaffected.
+const REGEN_CFG=[['regenDist','Retire distance (nearest chunk, in 16 m chunks)',6,20,1,0,''],['regenDelay','Retire delay after leaving',0,180,5,0,' s']];
+{const h=document.createElement('h3');h.textContent='WORLD REGEN (DRY RUN)';devControls.append(h);
+ const save=()=>{try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}};
+ const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';en.append(cb,' Log would-be rebuilds to the console');
+ cb.onchange=()=>{devValues.regenLog=cb.checked?1:0;save()};devSync.push(()=>{cb.checked=!!Number(devValues.regenLog)});cb.checked=!!Number(devValues.regenLog);devControls.append(en);
+ for(const [key,label,min,max,step,dec,suffix] of REGEN_CFG){
+  const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output'),val=()=>{const v=Number(devValues[key]);return Number.isFinite(v)?v:DEV_DEFAULT[key]};
+  cap.textContent=label;input.type='range';input.min=min;input.max=max;input.step=step;
+  const sync=()=>{input.value=val();out.textContent=val().toFixed(dec)+suffix};devSync.push(sync);sync();
+  input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};
+  row.append(cap,input,out);devControls.append(row)}
+ const st=document.createElement('div');st.style.cssText='font:11px monospace;opacity:.8;margin:2px 0 6px';devControls.append(st);
+ devSync.push(regenStat=()=>{const s=regen.stats();st.textContent=GEN_LEGACY?'off with ?gen=legacy':`tracked ${s.tracked} · waiting ${s.waiting} · retirable ${s.retirable} · events ${regenEvents}`})}
 // Start-room decal (fixed start area, docs/WORLDGEN.md): live, rebuilds only the one decal quad.
 const DECAL_CFG=[['decalH','Decal height',60,200,5,0,' cm'],['decalY','Decal centre above floor',80,220,5,0,' cm'],['decalOpacity','Decal opacity',0,100,1,0,'%'],['decalGain','Decal brightness',50,150,1,0,'%']];
 {const h=document.createElement('h3');h.textContent='START ROOM';devControls.append(h);

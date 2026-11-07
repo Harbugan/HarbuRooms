@@ -157,3 +157,34 @@ chunks (halls, forest, atrium), which are added per chunk; no pocket was found t
   * `?gen=legacy`: no region rooms there, so no decal.
 * `gen-check --epochs` also checks: pinned regions refuse an epoch; the start chunks and the decal position are unchanged in
   every random epoch table; the decal sits on a full wall.
+
+## Region retirement (continuous-world step 3: dry run)
+
+The game now decides which regions **could** be rebuilt with a new epoch, and only logs it. No epoch changes, so the world is
+unchanged. Applying it is step 4.
+
+* `regenTracker()` (GEN block, pure) tracks every non-pinned region that had a built chunk. A region becomes **retirable** when
+  1. neither the region nor a one-chunk ring around it holds a built or queued chunk (a built chunk depends on its 3 x 3
+     neighbourhood only, so no built chunk can see the change),
+  2. its nearest chunk is at least `regenDist` chunks from the player (default 8 = 128 m, hysteresis), and
+  3. both have held for `regenDelay` seconds (default 20 s). Coming back resets the timer.
+* `regionChunks(rx, rz)`: the 3 x 3 chunks of a region, without building it.
+* In game (`regenTick`, once a second from `updateChunks`): F3 "WORLD REGEN (DRY RUN)" has the distance, the delay, a console-log
+  switch (`[regen dry run] region rx,rz would be rebuilt ...`) and a live readout (tracked / waiting / retirable / events). Off with
+  `?gen=legacy`. Tracker entries are capped (512).
+* `tools/regen-sim.mjs` walks a virtual player with the game's loading rule and the game's own tracker. With `--apply` it really
+  bumps epochs (what step 4 will do) and checks, every 5 simulated seconds, that no built chunk or any of its 3 x 3 neighbour
+  layouts changed while built, and that the start chunks never change. `--no-ring` is a negative control.
+
+Measured (`regen-sim`, 1 h simulated walks, legs of 20-300 s at 1.4-4.6 m/s, every 4th leg back towards the spawn):
+
+| Run | Result |
+| --- | --- |
+| Dry run, 30 min, seed 1 | 517 would-be rebuilds; safety ok; start unchanged |
+| `--apply`, seeds 1/2/3 | 941 / 978 / 905 rebuilds; 183 / 171 / 258 revisits found a rebuilt region; epochs up to 4; safety ok; start unchanged |
+| `--apply --dist 6 --delay 0` (F3 minimum) | 264 rebuilds in 15 min; safety ok |
+| Negative control `--no-ring --dist 4` | FAIL, 2187 violations (the check does catch unsafe retirement) |
+| Headless Chromium, camera moved 576 m east | 34 dry-run log lines, no page errors |
+
+Not modelled by the simulator: walls (the virtual player walks through them) and the per-frame build queue (chunks appear at once;
+the game also counts queued chunks as busy).
