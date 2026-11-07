@@ -389,6 +389,7 @@ function regenTracker(cap=512){const T=new Map();
     seen(cx,cz){const [rx,rz]=regionAt(cx,cz);if(isPinnedRegion(rx,rz))return;const id=rx+','+rz;let e=T.get(id);
       if(!e){T.set(id,e={rx,rz,since:-1,ret:false});if(T.size>cap)for(const [k,v] of T)if(v.ret||T.size>cap*2){T.delete(k);if(T.size<=cap)break}}e.since=-1;e.ret=false},
     forget(rx,rz){T.delete(rx+','+rz)},
+    reset(){for(const e of T.values()){e.since=-1;e.ret=false}}, // re-evaluate everything (e.g. after switching dry run -> apply)
     update(now,pcx,pcz,busy,dist,delay){const out=[];
       for(const e of T.values()){const ch=regionChunks(e.rx,e.rz);let d=1e9,b=false;
         for(const [x,z] of ch)d=Math.min(d,Math.max(Math.abs(x-pcx),Math.abs(z-pcz)));
@@ -551,12 +552,17 @@ function addChunk(cx,cz){const id=cx+','+cz;if(chunks.has(id))return;regen.seen(
   scene.add(g);chunks.set(id,g)}
 function removeChunk(id,g){if(decal&&decal.group===g)decal=null;occRects.delete(id);{const [x,z]=id.split(',').map(Number);occMark(x,z)}scene.remove(g);g.traverse(o=>o.geometry&&o.geometry.dispose());chunks.delete(id)}
 const statusEl=document.querySelector('#status');let lastCx=NaN,lastCz=NaN,queue=[];
-// Region retirement, DRY RUN (continuous-world step 3): decides which regions could be rebuilt, logs them, changes nothing.
-// F3 "WORLD REGEN (DRY RUN)" sets distance/delay and logging. Checked once a second; busy = built or queued chunk.
-const regen=regenTracker();let regenAt=0,regenEvents=0,regenStat=null;
-function regenTick(now,cx,cz){if(now-regenAt<1000)return;regenAt=now;const q=new Set(queue.map(([x,z])=>x+','+z)),busy=(x,z)=>chunks.has(x+','+z)||q.has(x+','+z);
+// Region retirement (continuous-world step 4, docs/WORLDGEN.md "Region retirement"). Once a second (busy = built or queued chunk) the
+// tracker reports retirable regions; each gets epoch + 1, so it is built differently the next time the player gets there. The
+// caches rebuild themselves (region()/layout() compare epochs). ?regen=off, or F3 "Rebuild retired regions" off, = dry run: log only.
+// The epoch sequence is deterministic (0, 1, 2 ... per region), so the same route gives the same world.
+const REGEN_OFF=new URLSearchParams(location.search).get('regen')==='off';
+const regen=regenTracker();let regenAt=0,regenEvents=0,regenRebuilt=0,regenStat=null;
+const regenApplies=()=>!REGEN_OFF&&Number(devValues.regenApply)!==0;
+function regenTick(now,cx,cz){if(now-regenAt<1000)return;regenAt=now;const q=new Set(queue.map(([x,z])=>x+','+z)),busy=(x,z)=>chunks.has(x+','+z)||q.has(x+','+z),apply=regenApplies();
   for(const r of regen.update(now/1000,cx,cz,busy,devValues.regenDist??DEV_DEFAULT.regenDist,devValues.regenDelay??DEV_DEFAULT.regenDelay)){regenEvents++;
-    if(Number(devValues.regenLog))console.info(`[regen dry run] region ${r.rx},${r.rz} would be rebuilt (epoch ${r.epoch} -> ${r.epoch+1}); nearest chunk ${r.dist} chunks away`)}
+    if(apply&&setRegionEpoch(r.rx,r.rz,r.epoch+1)){regen.forget(r.rx,r.rz);regenRebuilt++}
+    if(Number(devValues.regenLog))console.info(`[regen${apply?'':' dry run'}] region ${r.rx},${r.rz} ${apply?'rebuilt':'would be rebuilt'} (epoch ${r.epoch} -> ${r.epoch+1}); nearest chunk ${r.dist} chunks away`)}
   if(devOpen&&regenStat)regenStat()}
 function updateChunks(){const cx=Math.floor(camera.position.x/tile),cz=Math.floor(camera.position.z/tile);
 if(cx!==lastCx||cz!==lastCz){lastCx=cx;lastCz=cz;queue=[];
@@ -591,7 +597,7 @@ let hum,AUD=null,stepN=null,masterGain=null;
 let introDuck=1,lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
 const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100,introEnabled:1,introDuration:8,introFall:1,introShake:.35,introBreath:.25,introImpact:.5,introDuck:.6,envEnabled:1,envWear:8,envDamp:3,envCeil:2,envIntensity:25,envShow:0,
   visProfile:0,visPost:1,bloomOn:1,lampGain:4,lampFog:36,bloomThr:1,bloomInt:28,bloomSpread:96,
-  fogBright:65,fogDens:100,exposure:100,toneKnee:100,grSat:90,grBlue:90,grLift:50,grGain:92,grCon:110,aoOn:1,aoInt:55,aoRad:60,lensDist:30,lensCA:40,grainShadow:60,showFps:0,regenLog:0,regenDist:8,regenDelay:20,decalOn:1,decalH:120,decalY:145,decalOpacity:100,decalGain:100}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
+  fogBright:65,fogDens:100,exposure:100,toneKnee:100,grSat:90,grBlue:90,grLift:50,grGain:92,grCon:110,aoOn:1,aoInt:55,aoRad:60,lensDist:30,lensCA:40,grainShadow:60,showFps:0,regenApply:1,regenLog:0,regenDist:8,regenDelay:20,decalOn:1,decalH:120,decalY:145,decalOpacity:100,decalGain:100}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
 let devSaved={};try{devSaved=JSON.parse(localStorage.getItem('nullrooms.dev')||'{}')||{}}catch(e){}
 // VISUAL / RENDERING: one gain set per profile, so tuning Realistic never touches Original. Defaults are 100 % = the look the post shader always had.
 const VIS_FX=[['grain','Grain intensity','uGrain'],['vig','Vignette intensity','uVig'],['scan','Scanline intensity','uScan'],['halo','Halation intensity','uHalo'],['ca','Chromatic aberration','uCA']];
@@ -985,11 +991,13 @@ function applyEnv(){matSystem?.setEnvironment({enabled:Number(devValues.envEnabl
   input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};
   row.append(cap,input,out);devControls.append(row)}
  applyEnv()}
-// Region retirement dry run (docs/WORLDGEN.md): only decides and logs; changes no epoch, so the world is unaffected.
+// Region retirement (docs/WORLDGEN.md): rebuilds regions the player has left far behind. ?regen=off = dry run (log only).
 const REGEN_CFG=[['regenDist','Retire distance (nearest chunk, in 16 m chunks)',6,20,1,0,''],['regenDelay','Retire delay after leaving',0,180,5,0,' s']];
-{const h=document.createElement('h3');h.textContent='WORLD REGEN (DRY RUN)';devControls.append(h);
+{const h=document.createElement('h3');h.textContent='WORLD REGEN'+(REGEN_OFF?' (?regen=off: DRY RUN)':'');devControls.append(h);
  const save=()=>{try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}};
- const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';en.append(cb,' Log would-be rebuilds to the console');
+ {const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';cb.disabled=REGEN_OFF;en.append(cb,' Rebuild retired regions (off = dry run, log only)');
+  cb.onchange=()=>{devValues.regenApply=cb.checked?1:0;save();regen.reset()};devSync.push(()=>{cb.checked=regenApplies()});cb.checked=regenApplies();devControls.append(en)}
+ const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';en.append(cb,' Log rebuilds to the console');
  cb.onchange=()=>{devValues.regenLog=cb.checked?1:0;save()};devSync.push(()=>{cb.checked=!!Number(devValues.regenLog)});cb.checked=!!Number(devValues.regenLog);devControls.append(en);
  for(const [key,label,min,max,step,dec,suffix] of REGEN_CFG){
   const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output'),val=()=>{const v=Number(devValues[key]);return Number.isFinite(v)?v:DEV_DEFAULT[key]};
@@ -998,7 +1006,7 @@ const REGEN_CFG=[['regenDist','Retire distance (nearest chunk, in 16 m chunks)',
   input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};
   row.append(cap,input,out);devControls.append(row)}
  const st=document.createElement('div');st.style.cssText='font:11px monospace;opacity:.8;margin:2px 0 6px';devControls.append(st);
- devSync.push(regenStat=()=>{const s=regen.stats();st.textContent=GEN_LEGACY?'off with ?gen=legacy':`tracked ${s.tracked} · waiting ${s.waiting} · retirable ${s.retirable} · events ${regenEvents}`})}
+ devSync.push(regenStat=()=>{const s=regen.stats();st.textContent=GEN_LEGACY?'off with ?gen=legacy':`tracked ${s.tracked} · waiting ${s.waiting} · retirable ${s.retirable} · events ${regenEvents} · rebuilt ${regenRebuilt}`})}
 // Start-room decal (fixed start area, docs/WORLDGEN.md): live, rebuilds only the one decal quad.
 const DECAL_CFG=[['decalH','Decal height',60,200,5,0,' cm'],['decalY','Decal centre above floor',80,220,5,0,' cm'],['decalOpacity','Decal opacity',0,100,1,0,'%'],['decalGain','Decal brightness',50,150,1,0,'%']];
 {const h=document.createElement('h3');h.textContent='START ROOM';devControls.append(h);
@@ -1063,7 +1071,7 @@ const devPadInvert=document.querySelector('#devPadInvert');devSync.push(()=>{dev
 function devRefresh(){devSync.forEach(fn=>fn());document.querySelector('#devStatus').textContent='Audio: '+(AUD?.ctx.state||'not started')+' | '+['footsteps','breathing_idle','cough'].map(k=>k+': '+(audioBuffers[k]?.length?'file':'fallback')).join(' / ')}
 function toggleDev(open){devOpen=open;devPanel.hidden=!open;if(open){if(padMode)pauseGame(true);if(document.pointerLockElement===renderer.domElement)document.exitPointerLock();devRefresh()}else if(hasStarted&&overlay.style.display==='none')renderer.domElement.requestPointerLock().catch(()=>showMenu())}
 document.querySelector('#devClose').onclick=()=>toggleDev(false);
-document.querySelector('#devReset').onclick=()=>{Object.assign(devValues,DEV_DEFAULT);applyDevGains();applyEnv();applyDecal();applyVisual();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}devRefresh()};
+document.querySelector('#devReset').onclick=()=>{Object.assign(devValues,DEV_DEFAULT);applyDevGains();applyEnv();applyDecal();regen.reset();applyVisual();try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}devRefresh()};
 document.querySelector('#devCopy').onclick=()=>{const data=JSON.stringify({audio:devValues,settings},null,2);navigator.clipboard?.writeText(data).catch(()=>console.info(data))};
 for(const button of devPanel.querySelectorAll('[data-sound]'))button.onclick=()=>{
  startHum();const t=AUD?.ctx.currentTime+.03;if(!AUD)return;
