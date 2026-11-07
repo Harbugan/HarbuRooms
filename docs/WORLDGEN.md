@@ -101,12 +101,37 @@ Measured (radius 9, 400 chunks, 51 regions; 4 runs seed 1-4 max epoch 3, and 12 
 | Locality (layouts / collision boxes) | ok in all 16 runs |
 | Determinism, boundary agreement | ok in all 16 runs |
 | Region border segments without a passable opening | 0 of 50 in every run (narrowest best opening: 3 cells) |
-| Unreachable pockets away from the window edge | 0 in 15 runs; 1 run: one 2 m2 pocket (maze zone) |
+| Unreachable pockets away from the window edge | 0 in all 16 runs (after the walkability repair below) |
 
-**Known, pre-existing:** the unreachable pocket is not caused by epochs. The unchanged `main` generator has them too once the test
-window is larger: radius 16 finds two 2 m2 pockets, radius 24 also a 6 m2 and a 73 m2 one, all in `maze` zones (radius 9, the
-area measured earlier, happens to contain none). Likely a room or door that is only one cell (0.7 m clear) wide somewhere after
-corridor stamping / sliver merging, not yet diagnosed. A sealed pocket cannot trap the player today, but a region that is not
-internally connected could, once neighbouring regions are rebuilt; this must be fixed before epochs are changed in game.
-Fixing it changes the epoch-0 world, so it is a separate, approved step.
+Further mixed-epoch runs: radius 16, 6 runs, max epoch 5: all checks ok, 0 pockets.
 
+## Walkability repair (step 1b)
+
+**Problem (pre-existing on `main`, not caused by epochs).** With a large enough test window the generator produced sealed
+pockets: radius 16 two of 2 m2, radius 24 also 6 m2 and 73 m2, all in `maze` zones. Cause: a room is a set of connected cells,
+but it can have a **1-cell neck** (1 m between two wall ends = 0.7 m clear, narrower than the player's 0.74 m). The door tree
+treats the room as one node, so the rooms behind the neck were "connected" on paper and sealed in practice. (The 1-cell
+"narrow join" case was suspected first; instrumenting showed it never happens in these areas.)
+
+**Fix (end of `region()`).** The region is flooded the way the player walks: an open edge counts only if its open stretch on that
+line, between wall ends (walls along the line or touching it from either side), is at least 2 cells. Every part that is cut off
+and contains a 2 x 2 block of cells (anything smaller is a nook the player cannot stand in) is joined to another part with a
+2-cell door (random among candidates, 65 % get a lintel like other doors). It only removes walls, so it cannot break anything
+else, and regions without a defect are bit-identical. The region's S/E border lines belong to the neighbours and are assumed to
+be wall (conservative).
+
+Measured:
+
+| | `main` | now |
+| --- | --- | --- |
+| Pockets away from the window edge, radius 9 / 16 / 24 / 32 | 0 / 2 / 4 / 6 (73, 6, 3, 2, 2, 2 m2) | 0 / 0 / 0 / 0 |
+| Regions repaired, radius 40 (784 regions), epoch 0 / two mixed-epoch tables | - | 1.7 % / 1.3 % / 1.1 %, one door each, never gives up |
+| Chunks whose layout differs from `main`, radius 32 (4225 chunks) | - | 9 (0.21 %); nearest 12 chunks (192 m) from spawn |
+| Epoch-0 digest vs `main`, radius 9 (start area) | - | 400 / 400 bit-identical |
+| Determinism, boundary agreement, region-border openings (radius 9-32) | ok | ok; no border segment without a passable opening |
+| Layout generation, radius 40 (Node, single run, noisy) | ~0.12 ms/chunk | ~0.165 ms/chunk |
+
+Not covered by the repair: openings **across** region borders. `region()` cannot see the neighbour's walls, so a border opening
+can be split into 1-cell pieces (`onePieceGaps` in `gen-check`). It is measured, not guaranteed: every border segment so far has at
+least one passable opening (narrowest best 2 cells at radius 32). Also not covered: pillars and free-standing walls in open
+chunks (halls, forest, atrium), which are added per chunk; no pocket was found there.

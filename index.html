@@ -323,6 +323,32 @@ function region(rx,rz){const id=rx+','+rz,ep=regionEpoch(rx,rz);let R=regCache.g
     for(let z=z0;z<z1&&same;z++)for(let x=x0;x<x1;x++)if(cm[z*S+x]!==c0){same=false;break}
     const vert=r()<.5,ln=vert?x0+3+Math.floor(r()*(x1-x0-5)):z0+3+Math.floor(r()*(z1-z0-5));
     if(same){if(vert){for(let z=z0+2;z<z1-2;z++)vw[ln*S+z]=1}else for(let x=x0+2;x<x1-2;x++)hw[ln*S+x]=1}}
+  // Walkability (docs/WORLDGEN.md, "Walkability repair"). A room is a set of connected cells, but it can have a 1-cell neck: 1 m
+  // between two wall ends is 0.7 m clear, narrower than the player (0.74 m), so the door tree above can believe rooms are joined
+  // when they are not. Flood the region the way the player walks: an open edge counts only if its open stretch on that line,
+  // between wall ends (walls along the line or touching it from either side), is >= 2 cells. Every cut-off part is then joined to
+  // another one with a 2-cell door. Only removes walls, so it never breaks anything; regions without a defect are left untouched.
+  // Parts without a 2 x 2 block of cells are nooks the player cannot stand in anyway (0.7 m clear) and are ignored.
+  // The region's S/E border lines belong to the neighbours and are assumed to be wall here (conservative).
+  {const wl=(ax,l,i)=>l>=S||i<0||i>=S?1:(ax?vw:hw)[l*S+i],pp=(ax,l,k)=>!!(wl(1-ax,k,l-1)||wl(1-ax,k,l)),P=[new Uint8Array(S*S),new Uint8Array(S*S)];
+    for(let guard=0;guard<8;guard++){
+      // P[ax][l*S+i] = 1: crossing line l at cell i is walkable (open, and its open stretch between wall ends is >= 2 cells)
+      for(let ax=0;ax<2;ax++){const A=P[ax];A.fill(0);for(let l=1;l<S;l++)for(let i=0;i<S;){if(wl(ax,l,i)){i++;continue}let j=i+1;while(j<S&&!wl(ax,l,j)&&!pp(ax,l,j))j++;if(j-i>=2)A.fill(1,l*S+i,l*S+j);i=j}}
+      const comp=new Int32Array(S*S).fill(-1),big=[];let nc=0;
+      for(let s=0;s<S*S;s++){if(comp[s]>=0)continue;comp[s]=nc;const st=[s];
+        while(st.length){const p=st.pop(),x=p%S,z=(p-x)/S;
+          if(x<S-1&&P[1][(x+1)*S+z]&&comp[p+1]<0){comp[p+1]=nc;st.push(p+1)}if(x>0&&P[1][x*S+z]&&comp[p-1]<0){comp[p-1]=nc;st.push(p-1)}
+          if(z<S-1&&P[0][(z+1)*S+x]&&comp[p+S]<0){comp[p+S]=nc;st.push(p+S)}if(z>0&&P[0][z*S+x]&&comp[p-S]<0){comp[p-S]=nc;st.push(p-S)}}
+        nc++}
+      for(let z=0;z<S-1;z++)for(let x=0;x<S-1;x++){const c=comp[z*S+x];if(c===comp[z*S+x+1]&&c===comp[z*S+x+S]&&c===comp[z*S+x+S+1])big[c]=1}
+      if(big.filter(Boolean).length<2)break;
+      // candidate doors: two wall cells on one line, the same part on each side, no wall touching the vertex between them
+      const cand=[];for(let ax=0;ax<2;ax++)for(let l=1;l<S;l++)for(let i=0;i<S-1;i++){if(wl(ax,l,i)!==1||wl(ax,l,i+1)!==1||pp(ax,l,i+1))continue;
+        const c=(u,v)=>ax?comp[v*S+u]:comp[u*S+v],a=c(l-1,i),b=c(l,i);if(a!==b&&big[a]&&big[b]&&a===c(l-1,i+1)&&b===c(l,i+1))cand.push([ax,l,i,a,b])}
+      if(!cand.length)break;
+      for(let i=cand.length-1;i>0;i--){const j=Math.floor(r()*(i+1)),t=cand[i];cand[i]=cand[j];cand[j]=t}
+      const up=new Int32Array(nc).map((_,i)=>i),find=a=>{while(up[a]!==a)a=up[a]=up[up[a]];return a};
+      for(const [ax,l,i,a,b] of cand){const fa=find(a),fb=find(b);if(fa===fb)continue;up[fa]=fb;const arr=ax?vw:hw;arr[l*S+i]=arr[l*S+i+1]=0;if(r()<.65)lint.push([ax,l,i,i+2])}}}
   R={ox,oz,hw,vw,cm,cobst,lint,ep};regCache.set(id,R);return R}
 function layoutNew(cx,cz){const I=info(cx,cz),[rx,rz]=regionAt(cx,cz),R=region(rx,rz),S=RS,lx0=cx*N-R.ox,lz0=cz*N-R.oz,
     hw=new Uint8Array((N+1)*N),vw=new Uint8Array((N+1)*N),lab=new Int16Array(N*N),pillars=[],lint=[],
