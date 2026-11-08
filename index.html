@@ -462,7 +462,7 @@ glowMat.onBeforeCompile=sh=>{sh.uniforms.uGlow=GLOW_U;sh.fragmentShader='uniform
 // deterministic and seamless across chunk borders; sampled by the shared Level 0 materials (src/materials/level0.js). ORIGINAL: uAO.x = 0 -> never sampled.
 const OCC_N=1024,OCC_S=.25,OCC_B=64,occTex=new THREE.DataTexture(new Uint8Array(OCC_N*OCC_N*2),OCC_N,OCC_N,THREE.RGFormat,THREE.UnsignedByteType);
 occTex.minFilter=occTex.magFilter=THREE.LinearFilter;occTex.wrapS=occTex.wrapT=THREE.RepeatWrapping;occTex.generateMipmaps=false;occTex.unpackAlignment=1;occTex.needsUpdate=true;
-const AO_U={tOcc:{value:occTex},uAO:{value:new THREE.Vector4(0,.6,.5,0)}},occRects=new Map(),occDirty=new Set(),occBlock=new DataTexture_(),occPos=new THREE.Vector2();
+const AO_U={tOcc:{value:occTex},uAO:{value:new THREE.Vector4(0,.6,.5,0)},uDark:{value:new THREE.Vector4(0,0,0,0)},uDarkK:{value:new THREE.Vector3(.4,.3,6)}},occRects=new Map(),occDirty=new Set(),occBlock=new DataTexture_(),occPos=new THREE.Vector2();
 function DataTexture_(){const t=new THREE.DataTexture(new Uint8Array(OCC_B*OCC_B*2),OCC_B,OCC_B,THREE.RGFormat,THREE.UnsignedByteType);t.unpackAlignment=1;t.generateMipmaps=false;t.minFilter=t.magFilter=THREE.NearestFilter;return t}
 const occMod=(v,m)=>((v%m)+m)%m;
 function occRaster(bx,bz){const d=occBlock.image.data,x0=bx*OCC_B*OCC_S,z0=bz*OCC_B*OCC_S,x1=x0+OCC_B*OCC_S,z1=z0+OCC_B*OCC_S;d.fill(0);
@@ -515,6 +515,13 @@ const START_DECAL=startMark(),DECAL_ASPECT=1441/1881;let decal=null;
 const decalMat=new THREE.MeshLambertMaterial({transparent:true,vertexColors:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-4});
 new THREE.TextureLoader().load('assets/decals/start_window.webp',t=>{t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=renderer.capabilities.getMaxAnisotropy();decalMat.map=t;decalMat.needsUpdate=true;applyDecal()},
   undefined,e=>console.warn('[decal] start_window.webp not found; start-room decal hidden',e));
+// Anomaly 01 (docs/ANOMALIES.md): the darkness layer also goes into the materials outside the shared PBR set (legacy Lambert, ceiling grid, start decal)
+// so nothing stays unnaturally bright. uDark.w = 0 -> identical output; the lamp material is deliberately left alone (fixtures keep glowing).
+let darkReady=false;
+try{const {patchDarkness}=await import('./src/materials/level0.js');
+  patchDarkness(wallMat,'wall',AO_U,{id:'legacy-wall'});patchDarkness(floorMat,'floor',AO_U,{id:'legacy-floor'});patchDarkness(ceilMat,'ceil',AO_U,{id:'legacy-ceil'});
+  patchDarkness(gridMat,'ceil',AO_U,{id:'grid'});patchDarkness(decalMat,'wall',AO_U,{id:'decal',light:'color',hc:H});darkReady=true}
+catch(e){console.warn('[anomaly] darkness patch unavailable; anomalies disabled',e)}
 const decalVal=k=>{const v=Number(devValues[k]);return Number.isFinite(v)?v:DEV_DEFAULT[k]};
 function decalGeometry(){const M=START_DECAL,h=decalVal('decalH')/100,w=h*DECAL_ASPECT,yc=Math.min(decalVal('decalY')/100,H-h/2-.05),rx=M.nz,rz=-M.nx,o=.155,n=4,
     p=[],nr=[],c=[],u=[],ix=[]; // 4 x 4 vertices so the baked light can vary across it
@@ -594,10 +601,11 @@ function drawMap(now){if(now-mapAt<250)return;mapAt=now;
   g.strokeStyle='#d00';g.lineWidth=2;g.beginPath();g.moveTo(px,pz);g.lineTo(px-Math.sin(yaw)*14,pz-Math.cos(yaw)*14);g.stroke()}
 /* ---- AUDIO: lysstofrør-brummen, drømmende ekko-skridt, vejrtrækning ---- */
 let hum,AUD=null,stepN=null,masterGain=null;
-let introDuck=1,lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
+let introDuck=1,anomDuck=1,lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0,coughPulse=0;
 const DEV_DEFAULT={hum:100,footsteps:100,breathing:100,cough:100,reverb:100,introEnabled:1,introDuration:8,introFall:1,introShake:.35,introBreath:.25,introImpact:.5,introDuck:.6,envEnabled:1,envWear:8,envDamp:3,envCeil:2,envIntensity:25,envShow:0,
   visProfile:0,visPost:1,bloomOn:1,lampGain:4,lampFog:36,bloomThr:1,bloomInt:28,bloomSpread:96,
-  fogBright:65,fogDens:100,exposure:100,toneKnee:100,grSat:90,grBlue:90,grLift:50,grGain:92,grCon:110,aoOn:1,aoInt:55,aoRad:60,lensDist:30,lensCA:40,grainShadow:60,showFps:0,regenApply:1,regenLog:0,regenDist:8,regenDelay:20,decalOn:1,decalH:120,decalY:145,decalOpacity:100,decalGain:100}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
+  fogBright:65,fogDens:100,exposure:100,toneKnee:100,grSat:90,grBlue:90,grLift:50,grGain:92,grCon:110,aoOn:1,aoInt:55,aoRad:60,lensDist:30,lensCA:40,grainShadow:60,showFps:0,regenApply:1,regenLog:0,regenDist:8,regenDelay:20,decalOn:1,decalH:120,decalY:145,decalOpacity:100,decalGain:100,
+  anomAuto:1,anomMean:15,anomIntensity:100,anomSpread:25,anomSnap:100,anomBlink:300,anomSeed:40,anomSoft:30,anomGasp:50}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
 let devSaved={};try{devSaved=JSON.parse(localStorage.getItem('nullrooms.dev')||'{}')||{}}catch(e){}
 // VISUAL / RENDERING: one gain set per profile, so tuning Realistic never touches Original. Defaults are 100 % = the look the post shader always had.
 const VIS_FX=[['grain','Grain intensity','uGrain'],['vig','Vignette intensity','uVig'],['scan','Scanline intensity','uScan'],['halo','Halation intensity','uHalo'],['ca','Chromatic aberration','uCA']];
@@ -622,7 +630,7 @@ function applyVisual(){const u=vhsMat.uniforms,pre=visPrefix();u.uReal.value=dev
    u.uLens.value=R?bv('lensDist',30)/100*.06:0;u.uCAr.value=R?bv('lensCA',40)/100*.006:0;u.uGrainL.value=R?bv('grainShadow',60)/100:0}
   for(const [k,,uni] of VIS_FX){const v=Number(devValues[pre+k]);u[uni].value=(Number.isFinite(v)?Math.max(0,Math.min(200,v)):100)/100}}
 applyVisual();
-function applyDevGains(){if(!devGains)return;for(const k of ['hum','footsteps','breathing','cough'])devGains[k].gain.value=devScale(k)*(k==='hum'?introDuck:1);devGains.reverb.gain.value=.09*devScale('reverb')}
+function applyDevGains(){if(!devGains)return;for(const k of ['hum','footsteps','breathing','cough'])devGains[k].gain.value=devScale(k)*(k==='hum'?introDuck*anomDuck:1);devGains.reverb.gain.value=.09*devScale('reverb')}
 
 const AUDIO_ROOT='assets/audio/level0/';
 let audioBuffers={},audioManifest=null,audioLoading=null,audioStepIndex=0;
@@ -672,7 +680,7 @@ try{const a=new (window.AudioContext||window.webkitAudioContext)(),sr=a.sampleRa
   wet.connect(dl);dl.connect(dlp);dlp.connect(fb);fb.connect(dl);dlp.connect(eo).connect(out);dlp.connect(rv);
   const wob=a.createOscillator(),wg=a.createGain();wob.frequency.value=.27;wg.gain.value=.005;wob.connect(wg).connect(dl.delayTime);wob.start();
   // lysstofrør: 100 Hz ballast-brum (50 Hz net) med overtoner, svag højfrekvent summen og hvislen
-  const humBus=a.createGain();humBus.connect(out);
+  const humBus=a.createGain(),humDry=a.createGain(),humLP=filt('lowpass',1900,.6),humLPg=a.createGain();humLPg.gain.value=0;humBus.connect(humDry);humDry.connect(out);humBus.connect(humLP);humLP.connect(humLPg);humLPg.connect(out); // humDry=1 / humLPg=0 is transparent; the anomaly crossfades them (muffled, distant hum)
   const bz=a.createGain(),bl=filt('lowpass',720),bs=a.createGain();bz.gain.value=.055;bs.gain.value=.22;bl.connect(bz);bz.connect(humBus);bz.connect(bs).connect(wet);
   for(const [f,v,ty] of [[50,.18,'sine'],[100,.5,'sawtooth'],[200,.28,'sawtooth'],[300,.15,'sawtooth'],[400,.06,'square']]){const o=a.createOscillator(),g=a.createGain();o.type=ty;o.frequency.value=f;o.detune.value=R(-3,3);g.gain.value=v;o.connect(g).connect(bl);o.start()}
   const lf=a.createOscillator(),lg=a.createGain();lf.frequency.value=.13;lg.gain.value=.008;lf.connect(lg).connect(bz.gain);lf.start();
@@ -697,7 +705,7 @@ try{const a=new (window.AudioContext||window.webkitAudioContext)(),sr=a.sampleRa
     env.gain.exponentialRampToValueAtTime(.00001,t+duration);
     src.connect(bp).connect(lp).connect(env).connect(target);src.start(t,R(0,3),duration+.01);
   };
-  AUD={flicker,ctx:a,foley,voiceLP,puff,stepBus,breathBus,coughBus};
+  AUD={flicker,ctx:a,foley,voiceLP,puff,stepBus,breathBus,coughBus,humDry,humLPg};
   void loadLevel0Audio(a);
   nextBreath=a.currentTime+1.5;nextCough=a.currentTime+R(18,32);
 }catch(e){console.warn('Audio unavailable',e)}}
@@ -759,7 +767,7 @@ settingsBtn.onclick=()=>{showSettings=true;showMenu()};
 document.querySelector('#backBtn').onclick=()=>{showSettings=false;showMenu()};
 fullscreenBtn.onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch(e){document.querySelector('#error').textContent='Fullscreen unavailable: '+e.message}};
 document.addEventListener('fullscreenchange',()=>{fullscreenBtn.textContent=document.fullscreenElement?'WINDOWED':'FULLSCREEN'});
-exitBtn.onclick=()=>{introCancel();if(masterGain&&hum)masterGain.gain.setTargetAtTime(0,hum.currentTime,.08);hasStarted=false;showSettings=false;padMode=false;keys.clear();look.yaw=view.yaw=0;look.pitch=view.pitch=0;const p=findSpawn();camera.position.set(p[0],1.7,p[1]);showMenu()};
+exitBtn.onclick=()=>{introCancel();anomCancel();if(masterGain&&hum)masterGain.gain.setTargetAtTime(0,hum.currentTime,.08);hasStarted=false;showSettings=false;padMode=false;keys.clear();look.yaw=view.yaw=0;look.pitch=view.pitch=0;const p=findSpawn();camera.position.set(p[0],1.7,p[1]);showMenu()};
 start.onclick=async()=>{const viaPad=padStartPending;devOpen=false;devPanel.hidden=true;showSettings=false;startHum();if(masterGain&&hum)masterGain.gain.setTargetAtTime(settings.volume/100,hum.currentTime,.08);try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock()}catch(error){if(viaPad)enterPadMode();else{document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}}};
 document.addEventListener('pointerlockchange',()=>{const locked=document.pointerLockElement===renderer.domElement;if(locked){padMode=false;padStartPending=false;setPadCursor(false)}playing=locked||padMode;if(playing){const first=!hasStarted;hasStarted=true;overlay.style.display='none';if(first)introStart()}else{keys.clear();if(intro.active&&!devOpen)introSkip();if(!devOpen)showMenu()}});
 document.addEventListener('mousemove',e=>{if(document.pointerLockElement!==renderer.domElement||introLookLocked())return;inputMode='kbm';const factor=.002*settings.sensitivity/50;look.yaw-=e.movementX*factor;look.pitch=Math.max(-1.48,Math.min(1.48,look.pitch-e.movementY*factor))});
@@ -915,7 +923,7 @@ function introPlace(){ // keep the current spot if it has room to lie/kneel, els
   const ox=camera.position.x,oz=camera.position.z;if(clear(ox,oz))return;
   for(let r=.5;r<8;r+=.5)for(let a=0;a<24;a++){const x=ox+Math.cos(a/24*6.2832)*r,z=oz+Math.sin(a/24*6.2832)*r;if(clear(x,z)){camera.position.x=x;camera.position.z=z;return}}}
 function introStart(force){
-  if(intro.active)introCancel();
+  anomCancel();if(intro.active)introCancel();
   if(!force&&!introEnabled())return false;
   introPlace();
   Object.assign(intro,{state:'FALLING',active:true,t:0,k:iv('introDuration')/INTRO_T[3],ev:{},nextBreath:INTRO_T[0]+.5,breathPh:0,duckEnv:0,abort:false,abortT:0,from:null,seed:Math.random()*100});
@@ -944,6 +952,47 @@ function introTick(dt){
   introApply();
   if(intro.t/intro.k>=T4){intro.pose.y=1.7;introCancel()}
 }
+
+// ===== Anomaly 01: THE ENCROACHING DARKNESS (docs/ANOMALIES.md) =====
+// State machine in src/anomalies/encroachingDarkness.js (no side effects). Here: uniforms (shared with the Level 0 shaders), camera offsets (added
+// after handheld(), exactly like the intro: look/view are never touched), eyelid overlay, hum filter and the F3 values. ?anomalies=off disables it.
+const ANOM_CFG=[['anomIntensity','Darkness intensity',20,100,1,0,'%'],['anomSpread','Spread duration',12,60,1,0,' s'],['anomSnap','Snap camera intensity',0,200,5,0,'%'],['anomBlink','Blink duration (eyes closed)',150,600,10,0,' ms'],
+  ['anomSeed','Shadow anchoring (100 = only existing shadows, 0 = free noise)',0,100,1,0,'%'],['anomSoft','Front softness',10,60,1,0,'%'],['anomGasp','Snap-out gasp volume',0,100,5,0,'%'],['anomMean','Auto: mean wait between events',4,60,1,0,' min']];
+function av(k){const c=ANOM_CFG.find(x=>x[0]===k),v=Number(devValues[k]);return Number.isFinite(v)?(c?Math.max(c[2],Math.min(c[3],v)):v):DEV_DEFAULT[k]}
+const anomOff=new URLSearchParams(location.search).get('anomalies')==='off';
+let anomaly=null,anomCam={yaw:0,pitch:0,roll:0,shake:0},anomAudioL=0;
+const lidCss='position:fixed;left:-10%;width:120%;height:66vh;background:#000;pointer-events:none;z-index:3;visibility:hidden;will-change:transform;';
+const lidTop=document.createElement('div'),lidBot=document.createElement('div');
+lidTop.style.cssText=lidCss+'top:0;border-radius:0 0 50% 50%/0 0 20vh 20vh;box-shadow:0 14px 34px 10px #000';
+lidBot.style.cssText=lidCss+'bottom:0;border-radius:50% 50% 0 0/20vh 20vh 0 0;box-shadow:0 -14px 34px 10px #000';
+document.body.append(lidTop,lidBot);
+function anomLids(a){ // a: 0 open .. 1 closed. The lids come from the top and the bottom edge; their edges are curved and feathered.
+  if(a<=.001){lidTop.style.visibility=lidBot.style.visibility='hidden';return}
+  const o=1-a,tt=`translateY(calc(${-o*100}% - ${o*70}px))`,tb=`translateY(calc(${o*100}% + ${o*70}px))`;
+  lidTop.style.visibility=lidBot.style.visibility='visible';lidTop.style.transform=tt;lidBot.style.transform=tb}
+function anomAudio(l){ // l 0..1: the hum gets duller and more distant; l = 0 restores the exact original gains
+  if(Math.abs(l-anomAudioL)<.004&&!(l===0&&anomAudioL!==0))return;anomAudioL=l;
+  anomDuck=1-.28*l;applyDevGains();
+  if(!AUD||!AUD.humDry)return;const t=AUD.ctx.currentTime,dry=1-.65*l,lp=.5*l,tc=l===0?.05:.15;
+  for(const [g,v] of [[AUD.humDry.gain,dry],[AUD.humLPg.gain,lp]]){g.cancelScheduledValues(t);g.setTargetAtTime(v,t,tc);if(l===0)g.setValueAtTime(v,t+.4)}}
+function anomGasp(){if(!AUD)return;const v=av('anomGasp')/50;if(v<=0)return;const t=AUD.ctx.currentTime+.01;
+  try{AUD.puff(t,.2,.045*v,380,2600,AUD.foley);AUD.puff(t+.12,.16,.02*v,300,1800,AUD.foley)}catch(e){}}
+function anomApply(f){
+  AO_U.uDark.value.set(f.progress,f.on?f.intensity:0,f.seed,f.on?1:0);AO_U.uDarkK.value.set(av('anomSeed')/100,av('anomSoft')/100,6);
+  anomCam=f.cam;anomLids(f.lid);anomAudio(f.level);
+  for(const e of f.events||[])if(e==='gasp')anomGasp()}
+function anomCancel(){if(!anomaly)return;anomaly.cancel();anomApply(anomaly.rest())}
+function anomTick(dt){
+  if(anomaly){const f=anomaly.tick(dt,playing);if(f)anomApply(f)}
+  const c=anomCam;if(c.yaw||c.pitch||c.roll||c.shake){camera.rotation.x+=c.pitch;camera.rotation.y+=c.yaw;camera.rotation.z+=c.roll;vhsMat.uniforms.shake.value+=c.shake}}
+if(darkReady&&!anomOff)try{
+  const {createEncroachingDarkness}=await import('./src/anomalies/encroachingDarkness.js');
+  anomaly=createEncroachingDarkness({
+    cfg:()=>({auto:Number(devValues.anomAuto)!==0,meanMin:av('anomMean'),intensity:av('anomIntensity')/100,spread:av('anomSpread'),snap:av('anomSnap')/100,blink:av('anomBlink')/1000,softness:av('anomSoft')/100,seedWeight:av('anomSeed')/100}),
+    // never during the intro, in the title menu or while another sequence runs; automatic starts additionally need active play (not paused / F3)
+    canStart:auto=>hasStarted&&!intro.active&&(!auto||(playing&&!devOpen&&overlay.style.display==='none')),
+    random:Math.random});window.NULLROOMS_ANOMALY=anomaly; // console: NULLROOMS_ANOMALY.trigger() / .state
+}catch(e){console.warn('[anomaly] module unavailable',e)}
 
 const devRegistry=[
 ['AUDIO','hum','Fluorescent hum',0,200],['AUDIO','footsteps','Carpet footsteps',0,200],
@@ -1019,6 +1068,24 @@ const DECAL_CFG=[['decalH','Decal height',60,200,5,0,' cm'],['decalY','Decal cen
   const sync=()=>{input.value=decalVal(key);out.textContent=decalVal(key).toFixed(dec)+suffix};devSync.push(sync);sync();
   input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};
   row.append(cap,input,out);devControls.append(row)}}
+// ANOMALIES — THE ENCROACHING DARKNESS (F3). Values live in devValues (nullrooms.dev); the global F3 RESET restores DEV_DEFAULT too.
+{const h=document.createElement('h3');h.textContent='ANOMALIES — THE ENCROACHING DARKNESS'+(anomOff?' (?anomalies=off)':'');devControls.append(h);
+ const save=()=>{try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}};
+ const stat=document.createElement('div');stat.style.cssText='margin:6px 0;font-size:11px;white-space:pre-wrap';devControls.append(stat);
+ const anomStat=()=>{stat.textContent=!anomaly?'STATE: unavailable'+(anomOff?' (disabled by URL)':darkReady?'':' (darkness patch missing)'):'STATE: '+anomaly.state+(anomaly.active?'  '+anomaly.elapsed.toFixed(1)+' s':'  (calm '+Math.round(anomaly.calm)+' s)')};devSync.push(anomStat);anomStat();setInterval(()=>{if(devOpen)anomStat()},250);
+ const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';en.append(cb,' Automatic anomalies (rare, unpredictable; off = manual only)');
+ cb.onchange=()=>{devValues.anomAuto=cb.checked?1:0;save()};devSync.push(()=>{cb.checked=!!Number(devValues.anomAuto)});cb.checked=!!Number(devValues.anomAuto);devControls.append(en);
+ const tb=document.createElement('button');tb.textContent='TRIGGER ANOMALY NOW';tb.onclick=()=>{const st=document.querySelector('#devStatus');
+  if(!anomaly){st.textContent='Anomaly unavailable.';return}if(!hasStarted){st.textContent='Start the game first, then trigger.';return}if(intro.active){st.textContent='Intro is running; try again after it.';return}
+  if(!anomaly.trigger()){st.textContent='Anomaly already running.';anomStat();return}st.textContent='Anomaly started.';anomStat();toggleDev(false)};devControls.append(tb);
+ const cn=document.createElement('button');cn.textContent='ABORT / RESET NOW';cn.onclick=()=>{anomCancel();anomStat()};devControls.append(cn);
+ for(const [key,label,min,max,step,dec,suffix] of ANOM_CFG){
+  const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output');
+  cap.textContent=label;input.type='range';input.min=min;input.max=max;input.step=step;
+  const sync=()=>{input.value=av(key);out.textContent=av(key).toFixed(dec)+suffix};devSync.push(sync);sync();
+  input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};
+  row.append(cap,input,out);devControls.append(row)}
+ const rb=document.createElement('button');rb.textContent='RESET ANOMALY SETTINGS';rb.onclick=()=>{for(const k of Object.keys(DEV_DEFAULT))if(k.startsWith('anom'))devValues[k]=DEV_DEFAULT[k];save();devSync.forEach(fn=>fn())};devControls.append(rb)}
 // VISUAL / RENDERING section: profile switch (also F4 during play), post on/off, per-profile effect gains.
 const visToast=document.createElement('div');visToast.style.cssText='position:fixed;left:50%;bottom:9%;transform:translateX(-50%);padding:4px 10px;background:rgba(0,0,0,.6);color:#dce3dc;font:12px monospace;pointer-events:none;opacity:0;transition:opacity .25s;z-index:30';document.body.append(visToast);let visToastT=0;
 const visSave=()=>{try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}};
@@ -1103,6 +1170,6 @@ function handheld(now,dt,moving,running){const t=now/1000;moveAmt+=((moving?1:0)
   camera.rotation.set(view.pitch+sx+Math.cos(elapsed*2)*.009*moveAmt+Math.sin(t*37)*.012*jolt+Math.sin(t*23)*.009*coughPulse,view.yaw+sy+Math.cos(elapsed)*.008*moveAmt,roll+Math.sin(t*29)*.02*jolt,'YXZ');
   const f=settings.fov+(settings.bob?Math.sin(t*.4)*.8+Math.sin(t*1.3)*.4-runAmt*3-jolt*1.5:0);if(Math.abs(camera.fov-f)>.01){camera.fov=f;camera.updateProjectionMatrix()}
   vhsMat.uniforms.shake.value=jolt+runAmt*.5+coughPulse*.18}
-let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);sampleFps(now);const dt=Math.min((now-last)/1000,.05);last=now;pollGamepad(dt);const run=keys.has('ShiftLeft')||keys.has('ShiftRight')||padState.sprint;if(devOpen&&now-padDevAt>100){padDevAt=now;document.querySelector('#devPad').textContent=padDebugText(now)}if(playing&&!intro.active){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'))+padState.my;const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'))+padState.mx;if(f||s){const len=Math.hypot(f,s),speed=(run?4.6:2.5)*Math.min(1,len)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(run?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(run)}else {lastFootstep=0;camera.position.y+=(1.7-camera.position.y)*.12}}updateChunks();if(DBG_MAP)drawMap(now);ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&!intro.active&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight')||padState.mx!==0||padState.my!==0);handheld(now,dt,mv,mv&&(run));introTick(dt);breathe();
+let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);sampleFps(now);const dt=Math.min((now-last)/1000,.05);last=now;pollGamepad(dt);const run=keys.has('ShiftLeft')||keys.has('ShiftRight')||padState.sprint;if(devOpen&&now-padDevAt>100){padDevAt=now;document.querySelector('#devPad').textContent=padDebugText(now)}if(playing&&!intro.active){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'))+padState.my;const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'))+padState.mx;if(f||s){const len=Math.hypot(f,s),speed=(run?4.6:2.5)*Math.min(1,len)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(run?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(run)}else {lastFootstep=0;camera.position.y+=(1.7-camera.position.y)*.12}}updateChunks();if(DBG_MAP)drawMap(now);ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&!intro.active&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight')||padState.mx!==0||padState.my!==0);handheld(now,dt,mv,mv&&(run));anomTick(dt);introTick(dt);breathe();
 vhsMat.uniforms.time.value=now/1000%1000;occFlush();renderer.setRenderTarget(rt);renderer.render(scene,camera);bloomPass();renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();while(queue.length)updateChunks();{const [x,z]=findSpawn();camera.position.set(x,1.7,z)}requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
 </script></body></html>
