@@ -159,7 +159,7 @@ const ZONE_NAMES={halls:'LEVEL 0 — OPEN HALLS',maze:'LEVEL 0 — NARROW ROOMS'
 // Per-chunk character: regional zone, rare special rooms (never on corridors or at spawn), palette and ceiling height.
 function info(cx,cz){const id=cx+','+cz;let I=infoCache.get(id);if(I)return I;
   const hc=hCorr(cx,cz),vc=vCorr(cx,cz),n=vnoise(cx,cz,7,5);let sp=null;
-  if((cx||cz)&&!hc&&!vc){const s=hash(cx,cz,500);sp=s<.018?'dark':s<.032?'red':s<.046?'forest':s<.058?'atrium':s<.072?'closets':null}
+  if((cx||cz)&&!hc&&!vc){const s=hash(cx,cz,500);sp=s<.018?'dark':s<.032?'red':s<.034?'forest':s<.046?'atrium':s<.060?'closets':null}
   const kind=sp==='forest'||sp==='atrium'||sp==='closets'?sp:!cx&&!cz?'rooms':n<.32?'halls':n>.68?'maze':'rooms'; // spawn is always ordinary rooms
   const pal=sp==='red'?redPalette:palettes[Math.floor(hash(Math.floor(cx/2),Math.floor(cz/2))*palettes.length)];
   const name=sp==='red'?pal.name:ZONE_NAMES[sp]||(hc||vc?'LEVEL 0 — LONG HALLWAY':ZONE_NAMES[kind]||pal.name);
@@ -184,7 +184,7 @@ function edgeOpen(dir,cx,cz,rg){const A=dir?info(cx-1,cz):info(cx,cz-1),C=info(c
 function openFeatures(I,cx,cz,r,hw,vw,pillars){
     if(I.kind==='forest'){for(let i=0;i<8;i++)for(let j=0;j<8;j++)if(hash(cx*8+i,cz*8+j,640)>.12)pillars.push([.5+2*i,.5+2*j,.36])}
     else if(I.kind==='atrium'){for(const [x,z] of [[4,4],[12,4],[4,12],[12,12]])pillars.push([x,z,1.1])}
-    else{if(hash(Math.floor(cx/2),Math.floor(cz/2),600)<.6)for(let i=0;i<4;i++)for(let j=0;j<4;j++)pillars.push([3.5+4*i,3.5+4*j,.62]);
+    else{if(hash(Math.floor(cx/2),Math.floor(cz/2),600)<.1)for(let i=0;i<4;i++)for(let j=0;j<4;j++)pillars.push([3.5+4*i,3.5+4*j,.62]);
       // the odd free-standing wall in an open hall
       for(let n=r()<.45?1+Math.floor(r()*2):0;n>0;n--){const ax=r()<.5?0:1,line=2+4*Math.floor(r()*4),a=2+Math.floor(r()*6),b=Math.min(N-2,a+3+Math.floor(r()*4));
         for(let i=a;i<b;i++)(ax?vw:hw)[line*N+i]=1}}}
