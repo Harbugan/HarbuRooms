@@ -232,6 +232,45 @@ float aoFactor(vec3 P,vec3 N){
 const GLSL_AO_APPLY = /* glsl */`
 if(uAO.x>0.)diffuseColor.rgb*=1.-uAO.x*aoFactor(vMacroP,vEnvN);
 `;
+
+// ---------------------------------------------------------------------------------------------------------------
+// THE ENCROACHING DARKNESS (anomaly 01, docs/ANOMALIES.md). A shader-only layer, like AO / environment: no extra pass, mesh or material.
+// uDark = (progress 0..~1.4, intensity 0..1, per-run seed, on 0/1). While on = 0 the branch is skipped and the shader output is unchanged.
+// Every surface gets an "arrival time" T in [0,1] that is a pure, STATIC function of world position: T is low where the room already is in
+// shadow (contact AO + baked light level, weight uDarkK.x) and where a large-scale, domain-warped 3D noise is low (weight 1 - uDarkK.x).
+// The darkness of a fragment is smoothstep(T, T + uDarkK.y, progress). Because T never changes while progress only grows, darkness can
+// only advance (it never retreats) and the iso-contours of T sweep outwards as organic, merging blobs that start in corners and
+// wall joints. World-space + continuous in 3D, so walls, floor and ceiling join up and chunk seams are invisible. uDarkK.z = noise scale (m).
+// ---------------------------------------------------------------------------------------------------------------
+const GLSL_DARK = /* glsl */`
+uniform vec4 uDark; uniform vec3 uDarkK;
+float darkLocal=0.;
+float dkH(vec3 p){p=fract(p*.1031);p+=dot(p,p.zyx+31.32);return fract((p.x+p.y)*p.z);}
+float dkN(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.-2.*f);
+  return mix(mix(mix(dkH(i),dkH(i+vec3(1.,0.,0.)),f.x),mix(dkH(i+vec3(0.,1.,0.)),dkH(i+vec3(1.,1.,0.)),f.x),f.y),
+             mix(mix(dkH(i+vec3(0.,0.,1.)),dkH(i+vec3(1.,0.,1.)),f.x),mix(dkH(i+vec3(0.,1.,1.)),dkH(i+vec3(1.,1.,1.)),f.x),f.y),f.z);}
+float darkMask(vec3 P,vec3 N,float ao,float vl){
+  vec3 q=P/uDarkK.z+vec3(uDark.z,uDark.z*.37,uDark.z*.71);q.y*=1.25;
+  vec3 w=vec3(dkN(q*1.6),dkN(q*1.6+vec3(5.2,1.3,9.1)),dkN(q*1.6+vec3(2.7,8.4,3.3)))-.5; // domain warp: bends the fronts into tendrils
+  q+=w*1.5;
+  float big=dkN(q)*.58+dkN(q*2.1+7.3)*.30+dkN(q*4.4+13.1)*.12;
+  big=smoothstep(.22,.78,big);
+  float shadow=clamp(ao*1.2+(1.-smoothstep(.55,1.05,vl))*.55,0.,1.); // existing shadow: contact AO + low baked light
+  float T=mix(big,1.-shadow,uDarkK.x)+(dkN(P*3.1+uDark.z)-.5)*.07;
+  return smoothstep(T,T+uDarkK.y,uDark.x);
+}
+`;
+// P world position, N surface normal, L baked light level (without palette hue). Albedo goes to ~3 % at full darkness; lamps are other materials.
+const darkApply = (P, N, L) => /* glsl */`
+if(uDark.w>.5){darkLocal=darkMask(${P},${N},aoFactor(${P},${N}),${L})*uDark.y;diffuseColor.rgb*=1.-.97*darkLocal;}
+`;
+// Fog is applied after lighting; a darkened fragment must not be lifted back to the haze colour, so its fog share is darkened with it
+// (far, dark surfaces and openings go black instead of staying hazy). darkLocal = 0 when the anomaly is off -> no change.
+const GLSL_DARK_FOG = /* glsl */`
+#ifdef USE_FOG
+{float ffD=1.-exp(-fogDensity*fogDensity*vFogDepth*vFogDepth);gl_FragColor.rgb*=1.-darkLocal*ffD*.92;}
+#endif
+`;
 const GLSL_COLOR = /* glsl */`
 float macroV=macroField(vMacroP);
 #ifdef USE_COLOR
@@ -258,13 +297,36 @@ function makePbrMaterial(THREE, kind, def, tex, envU) {
     Object.assign(shader.uniforms, u, envU);
     shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vMacroP; attribute float aLight; attribute float aHc; varying float vAoH; varying float vLight; varying vec3 vEnvN;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvMacroP=position; vLight=aLight; vEnvN=normal; vAoH=aHc;');
     shader.fragmentShader = (def.macro.plane === 'wall' ? '#define MACRO_WALL\n' : '') + '#define ENV_' + kind.toUpperCase() + '\n' + shader.fragmentShader
-      .replace('#include <common>', '#include <common>\n' + GLSL_COMMON + GLSL_ENV + GLSL_AO)
-      .replace('#include <color_fragment>', GLSL_COLOR + GLSL_ENV_APPLY + GLSL_AO_APPLY)
-      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.directSpecular*=uSpec;reflectedLight.indirectSpecular*=uSpec;')
+      .replace('#include <common>', '#include <common>\n' + GLSL_COMMON + GLSL_ENV + GLSL_AO + GLSL_DARK)
+      .replace('#include <color_fragment>', GLSL_COLOR + GLSL_ENV_APPLY + GLSL_AO_APPLY + darkApply('vMacroP', 'vEnvN', 'vLight'))
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.directSpecular*=uSpec*(1.-darkLocal);reflectedLight.indirectSpecular*=uSpec*(1.-darkLocal);')
+      .replace('#include <fog_fragment>', '#include <fog_fragment>\n' + GLSL_DARK_FOG)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n' + GLSL_ROUGH);
   };
   m.customProgramCacheKey = () => 'level0-' + kind; // one program per surface kind, shared by every chunk
   return m;
+}
+
+
+// Adds the darkness layer to a material that is NOT one of the shared PBR materials: the legacy Lambert walls/floor/ceiling, the ceiling grid
+// strips and the start-room decal. kind = 'wall' | 'floor' | 'ceil'. U = { tOcc, uAO, uDark, uDarkK } (the shared uniform objects).
+// opts.light = 'aLight' (default, chunk meshes) | 'color' (decal: baked level is in the vertex colour); opts.hc = fixed ceiling height for
+// geometry without the aHc attribute. With uDark.w = 0 the output is identical to the unpatched material.
+export function patchDarkness(material, kind, U, opts = {}) {
+  const lightExpr = opts.light === 'color' ? 'color.r' : 'aLight', hcExpr = opts.hc === undefined ? 'aHc' : Number(opts.hc).toFixed(3);
+  material.onBeforeCompile = shader => {
+    for (const k of ['tOcc', 'uAO', 'uDark', 'uDarkK']) shader.uniforms[k] = U[k];
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vDkP; varying vec3 vDkN; varying float vDkL; varying float vAoH;' + (opts.light === 'color' ? '' : ' attribute float aLight;') + (opts.hc === undefined ? ' attribute float aHc;' : ''))
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvDkP=position; vDkN=normal; vDkL=${lightExpr}; vAoH=${hcExpr};`);
+    shader.fragmentShader = '#define ENV_' + kind.toUpperCase() + '\n' + shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vDkP; varying vec3 vDkN; varying float vDkL;\n' + GLSL_AO + GLSL_DARK)
+      .replace('#include <color_fragment>', '#include <color_fragment>\n' + darkApply('vDkP', 'vDkN', 'vDkL'))
+      .replace('#include <fog_fragment>', '#include <fog_fragment>\n' + GLSL_DARK_FOG);
+  };
+  material.customProgramCacheKey = () => 'dark-' + (opts.id || kind);
+  material.needsUpdate = true;
+  return material;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
