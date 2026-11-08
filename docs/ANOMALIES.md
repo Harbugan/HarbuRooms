@@ -78,7 +78,14 @@ Console: `NULLROOMS_ANOMALY.trigger()`, `.cancel()`, `.state`.
 ### Verification done
 * `node tools/anomaly-sim.mjs`: lifecycle order, monotonic progress, reset only while the lids are fully closed, camera offsets exactly 0 at the end and
   3-5 deg, pause freezes time and lids, cancel resets, no automatic start in grace / when vetoed / when disabled, hazard is random (not a fixed timer).
-* Headless Chromium (software GL, local three@0.160.1): no shader compile errors, full sequence run in both profiles, screenshots reviewed.
+* Headless Chromium (software GL, three@0.160.1 served locally, deterministic 33 ms frame stepping, 640x360): full sequence in ORIGINAL (11 screenshots) and in
+  REALISTIC (2 mid-sequence screenshots + end state); no shader compile errors or console errors in either run. Seen: darkness enters from the sides of a
+  wall and merges until the wall is nearly black; the frame is fully black while the lids are closed; the first frame after the snap shows the wall as before.
+* **Not covered by that run:** the camera stood close to a flat wall, so no corridor depth, ceiling, ceiling grid, start decal or lamps were in view (the code
+  paths exist but were not visually checked); the jerk and the audio were not observed; ORIGINAL/REALISTIC "unchanged when inactive" was not pixel-diffed against
+  `main` (only reasoned: `uDark.w = 0` skips the new branch, and the added varyings/uniforms do not alter the lit result).
+* Close to a flat wall the front looks like a soft, almost straight edge, because the 6 m noise scale covers less than one cell; in rooms it should look
+  more organic, but that is a hypothesis to check in the browser.
 
 ### Known limitations / risks
 * Cost while active: ~7 3-D noise evaluations + AO taps per fragment; inactive cost is one uniform branch. Not measured on a real GPU.
