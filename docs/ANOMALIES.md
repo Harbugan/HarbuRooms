@@ -182,7 +182,11 @@ and restored by the global F3 RESET. Console: `NULLROOMS_OBSERVER.trigger()`, `.
   * rendering (three@0.160.1 in Node): fits under a 2.9 m ceiling (top 2.80 m), 0.37 m wide incl. arms, upright 3.1 m under 6.6 m, ~1100 vertices, one
     mesh, moving does not rebuild, every built geometry disposed, nothing left after `dispose()`.
 * `node tools/anomaly-sim.mjs` and `node tools/gen-check.mjs --epochs` unchanged (all pass); the generator is not touched.
-* Headless Chromium (software GL): see the PR description for what that run did and did not cover.
+* Headless Chromium (software GL, three@0.160.1 served locally, 960x540): the page loads, all three modules import, no console / shader errors,
+  F3 section renders and its readout updates, FORCE VISIBLE puts a mesh in the scene (screenshot: thin dark legs and long arms in the spawn room), ABORT
+  removes it. **Not covered:** the spawn room is small, so the test figure stood 1.5-1.8 m away (fallback); headless mouse input did not turn the camera
+  under pointer lock, so no real A/B sighting, no 15-35 m view and no jolt / swing removal was observed in a browser. FORCE VISIBLE needs open space
+  within ±30 deg of the view; otherwise it reports why.
 
 ### Not verified / known limitations
 * **How it looks and feels** (silhouette at 15-35 m in fog, darkness, stoop, whether the jolt mask and swing removals really go unnoticed) needs a real

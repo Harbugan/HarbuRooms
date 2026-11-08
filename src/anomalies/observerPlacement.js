@@ -252,13 +252,17 @@ export function findPlacement(W, v, kind, opts) {
   return { ok: false, reason: 'no retreat path behind a corner' };
 }
 
-/** Debug fallback for FORCE VISIBLE: the farthest clear spot straight ahead (not used by real observations). */
+/** Debug fallback for FORCE VISIBLE: the farthest clear spot (up to dist) within ±30 deg of straight ahead, nearest to the centre
+ *  first. Not used by real observations (no plausibility / distance / pop-in rules). */
 export function testFallback(W, v, dist, height) {
-  const fx = -Math.sin(v.yaw), fz = -Math.cos(v.yaw); let best = null;
-  for (let s = 3; s <= dist; s += 0.25) {
-    const x = v.x + fx * s, z = v.z + fz * s;
-    if (blocked(W, v.x, 1.2, v.z, x, 1.2, z)) break;
-    const yaw = faceYaw(x, z, v.x, v.z); if (!standCheck(W, x, z, height, yaw)) best = { ok: true, x, z, yaw, mode: 'test-fallback', kind: 'test', cellKind: cellKind(W, Math.floor(x), Math.floor(z)) || 'open', dist: +s.toFixed(1), frac: 1, path: null };
+  for (const a of [0, 8, -8, 16, -16, 24, -24, 30, -30]) {
+    const yaw = v.yaw + a * DEG, fx = -Math.sin(yaw), fz = -Math.cos(yaw); let best = null;
+    for (let s = 1.5; s <= dist; s += 0.25) {
+      const x = v.x + fx * s, z = v.z + fz * s;
+      if (blocked(W, v.x, 1.2, v.z, x, 1.2, z)) break;
+      const fy = faceYaw(x, z, v.x, v.z); if (!standCheck(W, x, z, height, fy)) best = { ok: true, x, z, yaw: fy, mode: 'test-fallback', kind: 'test', cellKind: cellKind(W, Math.floor(x), Math.floor(z)) || 'open', dist: +s.toFixed(1), frac: 1, path: null };
+    }
+    if (best) return best;
   }
-  return best || { ok: false, reason: 'no free spot straight ahead' };
+  return { ok: false, reason: 'no free spot within 30 deg of the view direction (turn towards open space)' };
 }
