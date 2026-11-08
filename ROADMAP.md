@@ -1,6 +1,6 @@
 # THE NULL ROOMS — Roadmap
 
-Updated: 2026-11-07
+Updated: 2026-11-08
 
 This is a **planning document**, not a claim that all items have been tested or completed. Progress is based on repository review; visual acceptance requires in-game testing. Work on one milestone at a time.
 
@@ -9,11 +9,12 @@ This is a **planning document**, not a claim that all items have been tested or 
 
 Already implemented in the repository (subject to ongoing QA):
 - Deterministic, chunk-based procedural world with corridors, rooms and special areas.
+- Continuous-world region epochs, walkability repair, pinned start area with decal, and safe retirement/rebuilding of distant regions (PR #35 merged; real-browser return-trip QA pending).
 - First-person navigation, collision, pause/menu, fullscreen and configurable settings.
 - Level 0 external wallpaper, carpet and ceiling textures with procedural fallback and material comparison.
 - 0.5 × 1.0 m ceiling panel grid with aligned fluorescent fixtures.
 - Baked vertex-lighting, hemisphere fill, fog and VHS effects.
-- ORIGINAL / REALISTIC rendering profiles with F4 A/B comparison; REALISTIC HDR fluorescent bloom, fog, exposure, highlight shoulder and grade controls (4C.1 / 4C.2 merged; real-GPU visual acceptance pending).
+- ORIGINAL / REALISTIC rendering profiles with F4 A/B comparison; REALISTIC HDR fluorescent bloom, fog, exposure, highlight shoulder, grade, contact AO and subtle optics (4C.1–4C.3 merged; real-GPU visual/performance acceptance pending).
 - F3 debug FPS counter (merged; useful for measuring frame pacing and visual-effects overhead).
 - Step 4A shader-based wall wear, carpet dampness and ceiling stains (merged; visual acceptance pending).
 - Cinematic fall / landing / get-up intro (merged; in-browser acceptance pending).
@@ -25,15 +26,23 @@ Already implemented in the repository (subject to ongoing QA):
 | Priority | Milestone | Status | Definition of done |
 | --- | --- | --- | --- |
 | P1 | Level 0 lighting refinement | **IMPLEMENTED / VISUAL QA PENDING** (review `docs/LIGHTING.md` and current REALISTIC rendering) | Plausible diffuse fluorescent light; balanced bright/dim zones; preserved material colors; no obvious chunk seams or major performance regression. |
-| P2 | Room generation and proportions | **IN PROGRESS** — step 0 + 1 (tools, global room structure) in review, see `docs/WORLDGEN.md`; steps 2-5 planned. Continuous world: region epochs, walkability repair and fixed start area with decal, region retirement active (steps 0-4) in review, see `docs/WORLDGEN.md` | More believable, coherent Kane Parsons-inspired office spaces; less visibly random layout; reliable navigation. |
+| P2 | Room generation and architectural quality | **IN PROGRESS** — region-based room structure merged; visual assessment of room sizes, openings, corridors, dead ends and architectural plausibility still pending. See `docs/WORLDGEN.md`. | Believable, varied Kane Parsons-inspired spaces, reliable navigation and fewer visibly procedural patterns. |
+| P2a | Continuous world (region epochs, regeneration, fixed start) | **MERGED / BROWSER QA PENDING** — PR #35, steps 0–4: epochs, walkability repair, pinned start area/decal, safe retirement and rebuilding. Headless and simulation tests documented; real-GPU return-trip test still required. | No visible rebuilds or blocked routes; changed distant areas on return; stable start/decal; bounded resource use and frame times. |
 | P2b | Cinematic intro (fall, landing, getting up) | **MERGED / VISUAL QA PENDING** — implemented in `index.html`, tuned via F3 "CINEMATIC INTRO"; needs in-browser visual/audio check (see `docs/INTRO.md`) | ~8 s first-person intro on Start; skip + replay work; no regressions in lighting, movement or audio. |
 | P2c | 4C.1 Rendering foundation & A/B comparison | **MERGED / VISUAL QA PENDING** — Original reference, Realistic sRGB path, F3 controls and F4 A/B switch; see `docs/RENDERING.md`. | Original remains stable; Realistic uses consistent sRGB; A/B switch without rebuild or regressions. |
 | P2d | 4C.2 HDR bloom, fog, exposure & grading | **MERGED / VISUAL QA PENDING** — phase 1 HDR fluorescent lamps and multi-level bloom (PR #30); phase 2 fog, exposure, shoulder and grade controls (PR #31). REALISTIC only; software-GL checks performed, real-GPU evaluation still needed. | Convincing fluorescent glow and balanced shadow/colour response; Original unchanged; acceptable frame-time overhead. |
-| P2e | 4C.3 Ambient occlusion & subtle optics | **IN REVIEW / VISUAL QA PENDING** — analytic contact AO via a world-space occupancy map in the shared materials, plus subtle lens distortion, radial CA and shadow-weighted grain; REALISTIC only, F3 controls; ORIGINAL pixel-identical to `main` in headless test. Real-GPU look and FPS on/off (Apple Silicon) still to be checked; see `docs/RENDERING.md`. | Noticeable but subtle depth at wall/floor/ceiling contacts; no dirty halos, shimmer or seams; toggles and live tuning; measurable acceptable FPS cost; Original preserved. |
-| P3 | Ambient audio landscape | **PARTIAL / PLANNED** — fluorescent hum, clicks and flicker present; full spatial ambience and variation outstanding. | Subtle spatial fluorescent hum and room ambience; controlled silence and variation; no intrusive breathing/footsteps. |
+| P2e | 4C.3 Ambient occlusion & subtle optics | **MERGED / VISUAL & PERFORMANCE QA PENDING** — PR #34; analytic contact AO via a world-space occupancy map in the shared materials, plus subtle lens distortion, radial CA and shadow-weighted grain; REALISTIC only, F3 controls; ORIGINAL pixel-identical to `main` in headless test. Real-GPU look and FPS on/off (Apple Silicon) still to be checked; see `docs/RENDERING.md`. | Noticeable but subtle depth at wall/floor/ceiling contacts; no dirty halos, shimmer or seams; toggles and live tuning; measurable acceptable FPS cost; Original preserved. |
+| P3 | Ambient audio landscape | **PARTIAL / QA PENDING** — fluorescent hum, clicks and flicker present; code also contains footstep, breathing and cough sample/fallback paths, but audible defaults and desired disablement need checking. Full spatial ambience and variation outstanding. | Subtle spatial fluorescent hum and room ambience; controlled silence and variation; no intrusive breathing/footsteps. |
 | P4 | Environmental detail pass | **Step 4A MERGED / VISUAL QA PENDING** — subtle wall wear/discoloration, carpet dampness, ceiling stains as a shader layer with F3 "ENVIRONMENT" controls (`docs/ENVIRONMENT.md`); needs in-browser visual check. Odd openings/spatial cues not started | Restrained stains, irregularities, odd openings and spatial cues without visual clutter. |
 | P5 | Subtle anomalies | Planned | Rare, unsettling events that preserve ambiguity; no mandatory combat or monster systems. |
-| P6 | Performance and polish | **FOUNDATION STARTED** — F3 FPS counter merged (PR #33); benchmarking, optimization and browser QA remain. | Stable frame pacing, manageable chunk/resource usage, browser testing, bug fixes and documentation. |
+| P6 | Performance and polish | **FOUNDATION STARTED** — F3 FPS counter merged (PR #33); real-GPU AO/bloom on-off comparisons, chunk-streaming frame-time spikes, resource lifecycle and extended browser QA remain. | Stable frame pacing, manageable chunk/resource usage, browser testing, bug fixes and documentation. |
+
+## Verification backlog (not yet signed off)
+- Real-GPU visual review of 4C.1–4C.3: contacts, bloom, grading, optics, F4 A/B and ORIGINAL preservation.
+- Benchmark AO and bloom on/off, including Apple Silicon where available; inspect frame-time spikes during chunk streaming and occupancy texture updates.
+- Walk far enough to retire regions, return and verify changed distant layout, safe passages and unchanged pinned start/decal; run a longer navigation/resource-stability test.
+- Confirm actual audible defaults for footsteps, breathing and cough versus the intended quiet audio direction.
+- Review architectural plausibility in a real play-through before further world-generation feature work.
 
 ## Nice to have — not in current scope
 
@@ -60,6 +69,6 @@ Already implemented in the repository (subject to ongoing QA):
 - Update this roadmap when priorities or decisions change.
 
 ## Next action
-Claude Code: prepare and implement **4C.3 ambient occlusion and subtle optics** on a separate branch/PR. First inspect the current render pipeline, `docs/RENDERING.md`, `CLAUDE.md` and active REALISTIC defaults. Keep ORIGINAL frozen and all changes scoped to REALISTIC. Prioritize stable, restrained depth cues at architectural contacts; avoid heavy full-screen effects and visible halos. Expose useful live F3 controls and an off switch; compare FPS and frame pacing with 4C.3 on/off using the merged counter, including Apple Silicon where available. Verify in a real browser/GPU before visual sign-off; do not auto-merge.
+Run a focused real-browser QA pass on merged 4C.3 and continuous-world regeneration (PRs #34/#35), including FPS/frame pacing and start-area stability. Then prioritize architectural plausibility and room variation as the next scoped development milestone. Do not mark visual acceptance complete without play-testing; use separate branches/PRs for future code changes.
 
-Documentation note: `docs/RENDERING.md` still contains earlier in-review wording; update it as part of the 4C.3 PR to distinguish merged implementation from pending visual acceptance.
+Documentation follow-up: refresh the introductory status wording in `docs/RENDERING.md` and `docs/WORLDGEN.md` to reflect merges while retaining historical test notes.
