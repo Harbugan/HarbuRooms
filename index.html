@@ -605,7 +605,8 @@ let introDuck=1,anomDuck=1,lastFootstep=0,nextBreath=0,nextCough=0,breathPhase=0
 const DEV_DEFAULT={hum:66,footsteps:100,breathing:44,cough:140,reverb:70,introEnabled:1,introDuration:4.5,introFall:2,introShake:0.6,introBreath:0.35,introImpact:0.55,introDuck:0.6,envEnabled:1,envWear:33.5,envDamp:15.5,envCeil:7,envIntensity:24,envShow:0,
   visProfile:1,visPost:1,bloomOn:1,lampGain:4,lampFog:36,bloomThr:1,bloomInt:28,bloomSpread:96,
   fogBright:29,fogDens:164,exposure:109,toneKnee:100,grSat:102,grBlue:95,grLift:6,grGain:104,grCon:130,aoOn:1,aoInt:15,aoRad:75,lensDist:63,lensCA:77,grainShadow:64,showFps:0,regenApply:1,regenLog:0,regenDist:8,regenDelay:20,decalOn:1,decalH:200,decalY:220,decalOpacity:90,decalGain:50,
-  anomAuto:1,anomMean:15,anomIntensity:100,anomSpread:25,anomSnap:100,anomBlink:300,anomSeed:40,anomSoft:30,anomGasp:50}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
+  anomAuto:1,anomMean:15,anomIntensity:100,anomSpread:25,anomSnap:100,anomBlink:300,anomSeed:40,anomSoft:30,anomGasp:50,
+  obsAuto:1,obsMin:60,obsMax:240,obsProb:70,obsVis:700,obsDist:24,obsHeight:285,obsSpeed:140,obsTone:3}; // visProfile 0 = ORIGINAL (default, reference look), 1 = REALISTIC; per-profile effect gains are added below (percent, 100 = unchanged)
 let devSaved={};try{devSaved=JSON.parse(localStorage.getItem('nullrooms.dev')||'{}')||{}}catch(e){}
 // VISUAL / RENDERING: one gain set per profile, so tuning Realistic never touches Original. Defaults are 100 % = the look the post shader always had.
 const VIS_FX=[['grain','Grain intensity','uGrain'],['vig','Vignette intensity','uVig'],['scan','Scanline intensity','uScan'],['halo','Halation intensity','uHalo'],['ca','Chromatic aberration','uCA']];
@@ -769,7 +770,7 @@ settingsBtn.onclick=()=>{showSettings=true;showMenu()};
 document.querySelector('#backBtn').onclick=()=>{showSettings=false;showMenu()};
 fullscreenBtn.onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch(e){document.querySelector('#error').textContent='Fullscreen unavailable: '+e.message}};
 document.addEventListener('fullscreenchange',()=>{fullscreenBtn.textContent=document.fullscreenElement?'WINDOWED':'FULLSCREEN'});
-exitBtn.onclick=()=>{introCancel();anomCancel();if(masterGain&&hum)masterGain.gain.setTargetAtTime(0,hum.currentTime,.08);hasStarted=false;showSettings=false;padMode=false;keys.clear();look.yaw=view.yaw=0;look.pitch=view.pitch=0;const p=findSpawn();camera.position.set(p[0],1.7,p[1]);showMenu()};
+exitBtn.onclick=()=>{introCancel();anomCancel();obsCancel();if(masterGain&&hum)masterGain.gain.setTargetAtTime(0,hum.currentTime,.08);hasStarted=false;showSettings=false;padMode=false;keys.clear();look.yaw=view.yaw=0;look.pitch=view.pitch=0;const p=findSpawn();camera.position.set(p[0],1.7,p[1]);showMenu()};
 start.onclick=async()=>{const viaPad=padStartPending;devOpen=false;devPanel.hidden=true;showSettings=false;startHum();if(masterGain&&hum)masterGain.gain.setTargetAtTime(settings.volume/100,hum.currentTime,.08);try{if(!renderer.domElement.requestPointerLock)throw new Error('Pointer Lock is unavailable in this browser.');await renderer.domElement.requestPointerLock()}catch(error){if(viaPad)enterPadMode();else{document.querySelector('#error').textContent='Cannot capture mouse: '+error.message;console.error(error)}}};
 document.addEventListener('pointerlockchange',()=>{const locked=document.pointerLockElement===renderer.domElement;if(locked){padMode=false;padStartPending=false;setPadCursor(false)}playing=locked||padMode;if(playing){const first=!hasStarted;hasStarted=true;overlay.style.display='none';if(first)introStart()}else{keys.clear();if(intro.active&&!devOpen)introSkip();if(!devOpen)showMenu()}});
 document.addEventListener('mousemove',e=>{if(document.pointerLockElement!==renderer.domElement||introLookLocked())return;inputMode='kbm';const factor=.002*settings.sensitivity/50;look.yaw-=e.movementX*factor;look.pitch=Math.max(-1.48,Math.min(1.48,look.pitch-e.movementY*factor))});
@@ -925,7 +926,7 @@ function introPlace(){ // keep the current spot if it has room to lie/kneel, els
   const ox=camera.position.x,oz=camera.position.z;if(clear(ox,oz))return;
   for(let r=.5;r<8;r+=.5)for(let a=0;a<24;a++){const x=ox+Math.cos(a/24*6.2832)*r,z=oz+Math.sin(a/24*6.2832)*r;if(clear(x,z)){camera.position.x=x;camera.position.z=z;return}}}
 function introStart(force){
-  anomCancel();if(intro.active)introCancel();
+  anomCancel();obsCancel();if(intro.active)introCancel();
   if(!force&&!introEnabled())return false;
   introPlace();
   Object.assign(intro,{state:'FALLING',active:true,t:0,k:iv('introDuration')/INTRO_T[3],ev:{},nextBreath:INTRO_T[0]+.5,breathPh:0,duckEnv:0,abort:false,abortT:0,from:null,seed:Math.random()*100});
@@ -962,7 +963,7 @@ const ANOM_CFG=[['anomIntensity','Darkness intensity',20,100,1,0,'%'],['anomSpre
   ['anomSeed','Shadow anchoring (100 = only existing shadows, 0 = free noise)',0,100,1,0,'%'],['anomSoft','Front softness',10,60,1,0,'%'],['anomGasp','Snap-out gasp volume',0,100,5,0,'%'],['anomMean','Auto: mean wait between events',4,60,1,0,' min']];
 function av(k){const c=ANOM_CFG.find(x=>x[0]===k),v=Number(devValues[k]);return Number.isFinite(v)?(c?Math.max(c[2],Math.min(c[3],v)):v):DEV_DEFAULT[k]}
 const anomOff=new URLSearchParams(location.search).get('anomalies')==='off';
-let anomaly=null,anomCam={yaw:0,pitch:0,roll:0,shake:0},anomAudioL=0;
+let anomaly=null,anomCam={yaw:0,pitch:0,roll:0,shake:0},anomAudioL=0,observer=null; // observer: anomaly 02 (below); the two never start automatically on top of each other
 const lidCss='position:fixed;left:-10%;width:120%;height:66vh;background:#000;pointer-events:none;z-index:3;visibility:hidden;will-change:transform;';
 const lidTop=document.createElement('div'),lidBot=document.createElement('div');
 lidTop.style.cssText=lidCss+'top:0;border-radius:0 0 50% 50%/0 0 20vh 20vh;box-shadow:0 14px 34px 10px #000';
@@ -992,9 +993,42 @@ if(darkReady&&!anomOff)try{
   anomaly=createEncroachingDarkness({
     cfg:()=>({auto:Number(devValues.anomAuto)!==0,meanMin:av('anomMean'),intensity:av('anomIntensity')/100,spread:av('anomSpread'),snap:av('anomSnap')/100,blink:av('anomBlink')/1000,softness:av('anomSoft')/100,seedWeight:av('anomSeed')/100}),
     // never during the intro, in the title menu or while another sequence runs; automatic starts additionally need active play (not paused / F3)
-    canStart:auto=>hasStarted&&!intro.active&&(!auto||(playing&&!devOpen&&overlay.style.display==='none')),
+    canStart:auto=>hasStarted&&!intro.active&&(!auto||(playing&&!devOpen&&overlay.style.display==='none'&&!(observer&&observer.active))),
     random:Math.random});window.NULLROOMS_ANOMALY=anomaly; // console: NULLROOMS_ANOMALY.trigger() / .state
 }catch(e){console.warn('[anomaly] module unavailable',e)}
+// ===== Anomaly 02: THE OBSERVER (docs/ANOMALIES.md) =====
+// Timing + lifecycle in src/anomalies/observer.js, placement / line of sight in observerPlacement.js (on the same layout() wall grid that
+// addChunk() builds walls and collision from), the figure in observerFigure.js (one mesh, one shared material, only while needed).
+// Here: the host (world, camera view, blocking rules), the frame hook and the F3 values. ?anomalies=off disables it too.
+const OBS_CFG=[['obsMin','Minimum interval',20,600,5,0,' s'],['obsMax','Maximum interval',30,900,5,0,' s'],['obsProb','Visible sighting probability',0,100,1,0,'%'],
+  ['obsVis','Maximum visibility duration',200,2000,50,0,' ms'],['obsDist','Observer distance (preferred; band ~0.6x-1.45x)',12,40,1,0,' m'],['obsHeight','Observer height (stoops under low ceilings)',240,340,5,0,' cm'],
+  ['obsSpeed','Peripheral retreat speed',40,300,10,0,' cm/s'],['obsTone','Figure tone (albedo)',1,12,.5,1,'%']];
+function ov(k){const c=OBS_CFG.find(x=>x[0]===k),v=Number(devValues[k]);return Number.isFinite(v)?(c?Math.max(c[2],Math.min(c[3],v)):v):DEV_DEFAULT[k]}
+let obsFig=null;const obsLights=new Map();
+function obsLightAt(x,y,z){const cx=Math.floor(x/N),cz=Math.floor(z/N),id=cx+','+cz;let e=obsLights.get(id);
+  if(!e){const ox=cx*N,oz=cz*N,ls=[];for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++)for(const l of layout(cx+a,cz+b).lights)if(l.k>0&&l.x>ox-8&&l.x<ox+N+8&&l.z>oz-8&&l.z<oz+N+8)ls.push(l);
+    e={ls,dim:layout(cx,cz).I.sp==='dark'?LIGHT.dark:1};obsLights.set(id,e)}
+  return bakeLevel(e.ls,x,y,z,'wall',e.dim)}
+function obsView(){const f=camera.fov*Math.PI/180;return {x:camera.position.x,y:camera.position.y,z:camera.position.z,yaw:camera.rotation.y,pitch:camera.rotation.x,vfov:f,hfov:2*Math.atan(Math.tan(f/2)*camera.aspect)}}
+let obsHideNext=false;
+// mask 'jolt': the game's normal handheld camera jolt is started now (it shows from the next frame on, handheld() has already run) and
+// the figure is removed on that next frame, so the removal coincides with the jolt's first frame.
+function obsApply(f){if(!obsFig)return;obsHideNext=false;
+  if(f&&f.mask==='jolt'&&!f.show&&obsFig.mesh){jolt=Math.max(jolt,.5+Math.random()*.3);obsHideNext=true;return}
+  obsFig.update(f);if(!f||!f.show)obsLights.clear()}
+function obsCancel(){if(!observer)return;observer.cancel();obsApply(null)}
+function obsTick(dt){if(!observer)return;if(obsHideNext)obsApply(null);const f=observer.tick(dt,playing&&!intro.active);if(f)obsApply(f)}
+if(!anomOff)try{
+  const [{createObserver},{makeGridWorld},{createObserverRenderer}]=await Promise.all([import('./src/anomalies/observer.js'),import('./src/anomalies/observerPlacement.js'),import('./src/anomalies/observerFigure.js')]);
+  observer=createObserver({
+    cfg:()=>({auto:Number(devValues.obsAuto)!==0,minS:ov('obsMin'),maxS:ov('obsMax'),prob:ov('obsProb')/100,maxVis:ov('obsVis')/1000,dist:ov('obsDist'),height:ov('obsHeight')/100,speed:ov('obsSpeed')/100}),
+    // never during the intro / title menu / another anomaly; automatic attempts also need active play (not paused, not F3)
+    block:auto=>!hasStarted?'game not started':intro.active?'intro running':(anomaly&&anomaly.active)?'another anomaly is active':auto&&!(playing&&!devOpen&&overlay.style.display==='none')?'not actively playing':'',
+    world:makeGridWorld({layout,N,doorTop:DOOR_TOP,built:(cx,cz)=>chunks.has(cx+','+cz)}),
+    view:obsView,random:Math.random});
+  obsFig=createObserverRenderer(THREE,{scene,lightAt:obsLightAt,albedo:()=>ov('obsTone')/100});
+  window.NULLROOMS_OBSERVER=observer; // console: NULLROOMS_OBSERVER.trigger() / .forceVisible() / .cancel() / .state / .stats
+}catch(e){console.warn('[observer] module unavailable',e)}
 
 const devRegistry=[
 ['AUDIO','hum','Fluorescent hum',0,200],['AUDIO','footsteps','Carpet footsteps',0,200],
@@ -1079,7 +1113,7 @@ const DECAL_CFG=[['decalH','Decal height',60,200,5,0,' cm'],['decalY','Decal cen
  cb.onchange=()=>{devValues.anomAuto=cb.checked?1:0;save()};devSync.push(()=>{cb.checked=!!Number(devValues.anomAuto)});cb.checked=!!Number(devValues.anomAuto);devControls.append(en);
  const tb=document.createElement('button');tb.textContent='TRIGGER ANOMALY NOW';tb.onclick=()=>{const st=document.querySelector('#devStatus');
   if(!anomaly){st.textContent='Anomaly unavailable.';return}if(!hasStarted){st.textContent='Start the game first, then trigger.';return}if(intro.active){st.textContent='Intro is running; try again after it.';return}
-  if(!anomaly.trigger()){st.textContent='Anomaly already running.';anomStat();return}st.textContent='Anomaly started.';anomStat();toggleDev(false)};devControls.append(tb);
+  obsCancel();if(!anomaly.trigger()){st.textContent='Anomaly already running.';anomStat();return}st.textContent='Anomaly started.';anomStat();toggleDev(false)};devControls.append(tb);
  const cn=document.createElement('button');cn.textContent='ABORT / RESET NOW';cn.onclick=()=>{anomCancel();anomStat()};devControls.append(cn);
  for(const [key,label,min,max,step,dec,suffix] of ANOM_CFG){
   const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output');
@@ -1088,6 +1122,34 @@ const DECAL_CFG=[['decalH','Decal height',60,200,5,0,' cm'],['decalY','Decal cen
   input.oninput=()=>{devValues[key]=Number(input.value);save();sync()};
   row.append(cap,input,out);devControls.append(row)}
  const rb=document.createElement('button');rb.textContent='RESET ANOMALY SETTINGS';rb.onclick=()=>{for(const k of Object.keys(DEV_DEFAULT))if(k.startsWith('anom'))devValues[k]=DEV_DEFAULT[k];save();devSync.forEach(fn=>fn())};devControls.append(rb)}
+// ANOMALIES — THE OBSERVER (F3). Same storage as above (nullrooms.dev, COPY CONFIG, global RESET).
+{const h=document.createElement('h3');h.textContent='ANOMALIES — THE OBSERVER'+(anomOff?' (?anomalies=off)':'');devControls.append(h);
+ const save=()=>{try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}};
+ const stat=document.createElement('div');stat.style.cssText='margin:6px 0;font-size:11px;white-space:pre-wrap';devControls.append(stat);
+ const st=()=>document.querySelector('#devStatus');
+ const obsStat=()=>{if(!observer){stat.textContent='STATE: unavailable'+(anomOff?' (disabled by URL)':'');return}
+  const o=observer,s=o.stats,f=o.figure,p=s.lastPlacement,v=f?obsView():null;
+  stat.textContent='STATE: '+o.state+(f?`  figure ${Math.hypot(f.x-v.x,f.z-v.z).toFixed(1)} m · seen ${o.seenTime.toFixed(2)} s`:'')+
+   '\nNEXT ATTEMPT: '+(Number(devValues.obsAuto)?Math.max(0,o.nextIn).toFixed(0)+' s of active play':'auto off')+
+   '\nLAST TYPE: '+s.lastType+'\nLAST OUTCOME: '+s.lastOutcome+
+   `\nATTEMPTS ${s.attempts} · seen ${s.seen} · unseen ${s.unseen} · empty ${s.empty} · rejected ${s.rejected}`+
+   '\nLAST REJECT: '+s.lastReason+(p?`\nLAST PLACEMENT: ${p.mode} · ${p.cell} · ${p.dist} m · visible ${Math.round(p.frac*100)} %`+(p.path?` · retreat ${p.path} m`:''):'')};
+ devSync.push(obsStat);obsStat();setInterval(()=>{if(devOpen)obsStat()},250);
+ const en=document.createElement('label');en.style.display='block';const cb=document.createElement('input');cb.type='checkbox';cb.style.width='auto';en.append(cb,' Automatic sightings (random intervals; off = manual only)');
+ cb.onchange=()=>{devValues.obsAuto=cb.checked?1:0;save()};devSync.push(()=>{cb.checked=!!Number(devValues.obsAuto)});cb.checked=!!Number(devValues.obsAuto);devControls.append(en);
+ const tb=document.createElement('button');tb.textContent='TRIGGER OBSERVER NOW';tb.onclick=()=>{if(!observer){st().textContent='Observer unavailable.';return}
+  if(observer.state==='TEST')obsCancel();const r=observer.trigger();if(r){st().textContent='Observer: '+r+'.';obsStat();return}
+  st().textContent='Observer armed: a real placement is tried on the first frame after resume (look around).';obsStat();toggleDev(false)};devControls.append(tb);
+ const fb=document.createElement('button');fb.textContent='FORCE VISIBLE / TEST PLACEMENT';fb.onclick=()=>{if(!observer){st().textContent='Observer unavailable.';return}if(!hasStarted){st().textContent='Start the game first.';return}
+  const r=observer.forceVisible();if(r){st().textContent='Test placement failed: '+r;obsStat();return}obsApply(observer.frame());st().textContent='Test figure held in view (debug only) until ABORT.';obsStat()};devControls.append(fb);
+ const cn=document.createElement('button');cn.textContent='ABORT / RESET NOW';cn.onclick=()=>{obsCancel();obsStat()};devControls.append(cn);
+ for(const [key,label,min,max,step,dec,suffix] of OBS_CFG){
+  const row=document.createElement('label'),cap=document.createElement('span'),input=document.createElement('input'),out=document.createElement('output');
+  cap.textContent=label;input.type='range';input.min=min;input.max=max;input.step=step;
+  const sync=()=>{input.value=ov(key);out.textContent=ov(key).toFixed(dec)+suffix};devSync.push(sync);sync();
+  input.oninput=()=>{devValues[key]=Number(input.value);save();sync();if(!observer)return;if(key==='obsMin'||key==='obsMax')observer.redraw();if(observer.state==='TEST')obsApply(observer.frame())};
+  row.append(cap,input,out);devControls.append(row)}
+ const rb=document.createElement('button');rb.textContent='RESET OBSERVER SETTINGS';rb.onclick=()=>{for(const k of Object.keys(DEV_DEFAULT))if(k.startsWith('obs'))devValues[k]=DEV_DEFAULT[k];save();devSync.forEach(fn=>fn());if(observer){observer.redraw();if(observer.state==='TEST')obsApply(observer.frame())}};devControls.append(rb)}
 // VISUAL / RENDERING section: profile switch (also F4 during play), post on/off, per-profile effect gains.
 const visToast=document.createElement('div');visToast.style.cssText='position:fixed;left:50%;bottom:9%;transform:translateX(-50%);padding:4px 10px;background:rgba(0,0,0,.6);color:#dce3dc;font:12px monospace;pointer-events:none;opacity:0;transition:opacity .25s;z-index:30';document.body.append(visToast);let visToastT=0;
 const visSave=()=>{try{localStorage.setItem('nullrooms.dev',JSON.stringify(devValues))}catch(e){}};
@@ -1172,6 +1234,6 @@ function handheld(now,dt,moving,running){const t=now/1000;moveAmt+=((moving?1:0)
   camera.rotation.set(view.pitch+sx+Math.cos(elapsed*2)*.009*moveAmt+Math.sin(t*37)*.012*jolt+Math.sin(t*23)*.009*coughPulse,view.yaw+sy+Math.cos(elapsed)*.008*moveAmt,roll+Math.sin(t*29)*.02*jolt,'YXZ');
   const f=settings.fov+(settings.bob?Math.sin(t*.4)*.8+Math.sin(t*1.3)*.4-runAmt*3-jolt*1.5:0);if(Math.abs(camera.fov-f)>.01){camera.fov=f;camera.updateProjectionMatrix()}
   vhsMat.uniforms.shake.value=jolt+runAmt*.5+coughPulse*.18}
-let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);sampleFps(now);const dt=Math.min((now-last)/1000,.05);last=now;pollGamepad(dt);const run=keys.has('ShiftLeft')||keys.has('ShiftRight')||padState.sprint;if(devOpen&&now-padDevAt>100){padDevAt=now;document.querySelector('#devPad').textContent=padDebugText(now)}if(playing&&!intro.active){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'))+padState.my;const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'))+padState.mx;if(f||s){const len=Math.hypot(f,s),speed=(run?4.6:2.5)*Math.min(1,len)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(run?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(run)}else {lastFootstep=0;camera.position.y+=(1.7-camera.position.y)*.12}}updateChunks();if(DBG_MAP)drawMap(now);ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&!intro.active&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight')||padState.mx!==0||padState.my!==0);handheld(now,dt,mv,mv&&(run));anomTick(dt);introTick(dt);breathe();
+let last=performance.now(),elapsed=0;function frame(now){requestAnimationFrame(frame);sampleFps(now);const dt=Math.min((now-last)/1000,.05);last=now;pollGamepad(dt);const run=keys.has('ShiftLeft')||keys.has('ShiftRight')||padState.sprint;if(devOpen&&now-padDevAt>100){padDevAt=now;document.querySelector('#devPad').textContent=padDebugText(now)}if(playing&&!intro.active){const f=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'))+padState.my;const s=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'))+padState.mx;if(f||s){const len=Math.hypot(f,s),speed=(run?4.6:2.5)*Math.min(1,len)*dt;const yaw=look.yaw,dx=(-Math.sin(yaw)*f+Math.cos(yaw)*s)/len*speed,dz=(-Math.cos(yaw)*f-Math.sin(yaw)*s)/len*speed;const stuck=collide(camera.position.x,camera.position.z);if(stuck||!collide(camera.position.x+dx,camera.position.z))camera.position.x+=dx;if(stuck||!collide(camera.position.x,camera.position.z+dz))camera.position.z+=dz;elapsed+=dt*(run?11:7.5);camera.position.y=1.7+(settings.bob?Math.sin(elapsed)*.03:0);footfalls(run)}else {lastFootstep=0;camera.position.y+=(1.7-camera.position.y)*.12}}updateChunks();if(DBG_MAP)drawMap(now);ambient.intensity=LIGHT.hemi+Math.sin(now*.05)*.02*Math.sin(now*.0013)+(flick()?-.25:0);const mv=playing&&!intro.active&&(keys.has('KeyW')||keys.has('ArrowUp')||keys.has('KeyS')||keys.has('ArrowDown')||keys.has('KeyA')||keys.has('ArrowLeft')||keys.has('KeyD')||keys.has('ArrowRight')||padState.mx!==0||padState.my!==0);handheld(now,dt,mv,mv&&(run));anomTick(dt);introTick(dt);obsTick(dt);breathe();
 vhsMat.uniforms.time.value=now/1000%1000;occFlush();renderer.setRenderTarget(rt);renderer.render(scene,camera);bloomPass();renderer.setRenderTarget(null);renderer.render(postScene,postCam);updateClock(now)}updateChunks();while(queue.length)updateChunks();{const [x,z]=findSpawn();camera.position.set(x,1.7,z)}requestAnimationFrame(frame);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);sizePost()});
 </script></body></html>
