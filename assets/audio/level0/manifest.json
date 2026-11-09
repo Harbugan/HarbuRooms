@@ -26,6 +26,12 @@
         "player/cough.ogg"
       ],
       "gain": 1
+    },
+    "intro_impact": {
+      "files": [
+        "intro/intro_impact.ogg"
+      ],
+      "gain": 1
     }
   }
 }
