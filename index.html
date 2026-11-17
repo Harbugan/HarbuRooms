@@ -16,7 +16,7 @@ try {
 }
 const scene=new THREE.Scene();const HAZE=0xb3a462,FOG_BASE=new THREE.Color(HAZE);scene.background=new THREE.Color(HAZE);scene.fog=new THREE.FogExp2(HAZE,.027);
 const camera=new THREE.PerspectiveCamera(78,innerWidth/innerHeight,.05,110);camera.rotation.order='YXZ';
-const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
+const renderer=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(renderer.domElement);
 // --- VHS post pass: scene renders into a half-float target, then a full-screen shader smears, wobbles, tints and vignettes it.
 let RES=.85;const rt=new THREE.WebGLRenderTarget(2,2,{type:THREE.HalfFloatType,samples:4,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
 const vhsMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tDiffuse:{value:rt.texture},time:{value:0},res:{value:new THREE.Vector2(1,1)},shake:{value:0},intensity:{value:.75},uReal:{value:0},uPost:{value:1},uGrain:{value:1},uVig:{value:1},uScan:{value:1},uHalo:{value:1},uCA:{value:1},uExp:{value:1},uTone:{value:1},uGrade:{value:new THREE.Vector4(.78,.92,1,1)},uBlue:{value:1},tBloom0:{value:null},tBloom1:{value:null},tBloom2:{value:null},uBloomOn:{value:0},uBloomW:{value:new THREE.Vector3()},uLens:{value:0},uCAr:{value:0},uGrainL:{value:0}},
