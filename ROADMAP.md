@@ -1,8 +1,35 @@
 # THE NULL ROOMS — Roadmap
 
-Updated: 2026-11-08
+Updated: 2026-11-19
 
 This is a **planning document**, not a claim that all items have been tested or completed. Progress is based on repository review; visual acceptance requires in-game testing. Work on one milestone at a time.
+
+## Current implementation checkpoint — 2026-11-19 (static audit)
+
+**Canonical entry point: `index.html`.** See [docs/CURRENT_IMPLEMENTATION.md](docs/CURRENT_IMPLEMENTATION.md) for the code-level inventory, current defaults, limitations and verification matrix. This checkpoint is **IMPLEMENTED IN CODE / NOT BROWSER-VERIFIED**; do not read it as QA sign-off.
+
+Newer code compared with this roadmap's previous 2026-11-08 snapshot:
+- **Default architecture changed:** `?gen=bays` uses 4 m structural bays; `?gen=region` and `?gen=legacy` remain alternatives. Prior region/BSP test results do not automatically validate bay-mode behavior.
+- **Procedural furniture:** multiple detailed furniture models, scenes, placement and collision, including CRTs and piles. Browser visuals and performance not accepted.
+- **Extended intro:** warehouse exterior and noclip descent before fall/landing/recovery; earlier intro documentation is incomplete.
+- **Inventory and map:** four pocket slots, pick up/drop/select, paper + pencil, progressively hand-sketched observed map that may become outdated after regeneration.
+- **Presences:** Silence, TV, Voice and Colleague with scheduling and F3 controls, in addition to previously documented Darkness/Observer. Evaluate whether Colleague is too literal for the intended ambiguity.
+- **Sickness:** cough progression, blood, collapses and final death implemented; code default enabled with 20 minutes to full sickness plus 4 minutes to terminal collapse. **Design acceptance pending**: this was previously only a possible narrative direction.
+- **Audio and performance:** intro impact manifest fix, audio asset uploads on 2026-11-19, PR #39 reduced pillar density, PR #40 removed redundant default framebuffer MSAA; sample playback and real-GPU performance remain unverified.
+- **File housekeeping:** `index2.html` was still retrievable on `main` at audit time despite planned deletion; recheck after GitHub sync.
+
+### Revised immediate priorities
+1. **P0 — Regression QA:** verify boot, intro, movement, pause, controller, inventory, map, sound, presences, sickness and reset in a real browser; record failures and reproduction steps.
+2. **P1 — Performance baseline:** measure median/p95/p99 frame times, GPU cost of bloom/AO/post, draw calls, memory and streaming spikes on Apple Silicon; only then optimize.
+3. **P1 — World-generation correctness:** validate default bay mode and its interaction with epoch retirement, navigation, furniture and map; verify bounded memory on long walks.
+4. **P1 — Creative acceptance:** decide whether Sickness/death and Colleague should remain default/automatic. Do not expand them before review.
+5. **P2 — Visual/audio polish:** Level 0 lighting, material realism, spatial sound and anomaly subtlety after the stability pass.
+
+### Status discipline
+- **Verified in source:** feature paths and default values identified in `index.html`.
+- **Implemented but untested:** the majority of newly uploaded gameplay systems.
+- **Verified in browser:** none newly signed off by this documentation update.
+- **Planned:** acceptance tests, measurements and any follow-up fixes.
 
 ## Current state
 **Playable browser prototype; Level 0 visual refinement in progress.**
@@ -70,6 +97,8 @@ Already implemented in the repository (subject to ongoing QA):
 - Update this roadmap when priorities or decisions change.
 
 ## Next action
+**Superseded by the 2026-11-19 checkpoint above:** first establish a real-browser regression and performance baseline for the much-expanded current `index.html`; then revisit the older 4C.3/region-specific QA tasks below.
+
 Run a focused real-browser QA pass on merged 4C.3 and continuous-world regeneration (PRs #34/#35), including FPS/frame pacing and start-area stability. Then prioritize architectural plausibility and room variation as the next scoped development milestone. Do not mark visual acceptance complete without play-testing; use separate branches/PRs for future code changes.
 
 Documentation follow-up: refresh the introductory status wording in `docs/RENDERING.md` and `docs/WORLDGEN.md` to reflect merges while retaining historical test notes.
